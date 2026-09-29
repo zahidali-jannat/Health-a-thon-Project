@@ -1,0 +1,149 @@
+@import "@fontsource-variable/inter";
+@import "tailwindcss";
+
+/*
+  UC2 design tokens.
+  Colour carries meaning only: brand (blue) = primary action / information, ok (green) = normal / done,
+  warn (amber) = pending / warning, alert (red) = critical / abnormal. Everything else is neutral.
+  Themes (dark, pleasant) redefine the same tokens, so no component knows which theme is active.
+*/
+@theme {
+  --font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* small, consistent radii - no pill shapes, no big bubbly cards */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 6px;
+  --radius-2xl: 8px;
+
+  --color-page: #f3f5f7;
+  --color-surface: #ffffff;
+  --color-subtle: #f7f9fa;          /* table headers, section bars */
+  --color-line: #dde2e7;
+  --color-line-strong: #c5cdd5;
+  --color-ink: #17222d;
+  --color-muted: #566573;
+
+  --color-brand-50: #edf3fa;
+  --color-brand-100: #d3e2f3;
+  --color-brand-600: #1c5ea8;
+  --color-brand-700: #174e8c;
+  --color-brand-800: #123e70;
+
+  --color-warn-50: #fdf5e6;
+  --color-warn-200: #efd29a;
+  --color-warn-700: #975a00;
+  --color-warn-800: #744500;
+
+  --color-alert-50: #fcefee;
+  --color-alert-200: #efc1bc;
+  --color-alert-700: #b3261e;
+  --color-alert-800: #8c1d17;
+
+  --color-ok-50: #ecf6ef;
+  --color-ok-700: #1d7639;
+
+  /* chart chrome: the reference band is a quiet "normal" green */
+  --color-band: #e3f1e7;
+  --color-band-edge: #9cc9aa;
+  --color-grid: #e7ebef;
+  --color-axis: #cbd3da;
+  --color-crosshair: #97a3ae;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-page: #0e1318;
+  --color-surface: #161d24;
+  --color-subtle: #1b232b;
+  --color-line: #2a343e;
+  --color-line-strong: #3a4652;
+  --color-ink: #e6ecf1;
+  --color-muted: #9fadb9;
+
+  --color-brand-50: #152838;
+  --color-brand-100: #1c3650;
+  --color-brand-600: #2f78c8;
+  --color-brand-700: #7fb4ea;
+  --color-brand-800: #a9ccf1;
+
+  --color-warn-50: #332612;
+  --color-warn-200: #6b4f1c;
+  --color-warn-700: #e8b04e;
+  --color-warn-800: #f0c877;
+
+  --color-alert-50: #3a1816;
+  --color-alert-200: #72302a;
+  --color-alert-700: #f2847a;
+  --color-alert-800: #f6a8a0;
+
+  --color-ok-50: #14301f;
+  --color-ok-700: #74cf93;
+
+  --color-band: #1a3526;
+  --color-band-edge: #3e7253;
+  --color-grid: #25303a;
+  --color-axis: #3a4652;
+  --color-crosshair: #6d7c89;
+}
+
+:root[data-theme="pleasant"] {
+  --color-page: #f2eee6;
+  --color-surface: #fbf9f4;
+  --color-subtle: #f6f2ea;
+  --color-line: #e2dacb;
+  --color-line-strong: #d0c5b1;
+  --color-ink: #29241e;
+  --color-muted: #655b4f;
+
+  --color-brand-50: #ecf1f6;
+  --color-brand-100: #d7e2ec;
+  --color-brand-600: #2d5d8c;
+  --color-brand-700: #244c73;
+  --color-brand-800: #1c3c5b;
+
+  --color-warn-50: #faf1de;
+  --color-alert-50: #f8ebe6;
+  --color-ok-50: #e9f1e5;
+
+  --color-band: #e4eedd;
+  --color-band-edge: #a9c59e;
+  --color-grid: #e7e0d2;
+  --color-axis: #d4c9b5;
+  --color-crosshair: #a2968a;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";   /* Inter: single-storey a, clearer 1/l for clinical numbers */
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
+}
+
+/* Numbers in tables and clinical values line up */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A plain fade for panels and tooltips - no sliding, no bounce */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in {
+  animation: fade-in 130ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fade-in { animation: none; }
+}
