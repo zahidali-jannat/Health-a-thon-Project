@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, ArrowLeft, CalendarDays, Camera, CheckCircle2, ChevronRight, Droplet, FileText, FlaskConical, FolderOpen, House, KeyRound, LogIn, LogOut,
+  AlertTriangle, ArrowLeft, CalendarDays, Camera, ClipboardList, CheckCircle2, ChevronRight, Droplet, FileText, FlaskConical, FolderOpen, House, KeyRound, LogIn, LogOut,
   Pill, ShieldCheck, Stethoscope, Upload, UserPlus,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -78,6 +78,7 @@ export default function Portal() {
     case 'documents': return <DocumentsScreen {...props} />
     case 'doctors': return <DoctorsScreen {...props} />
     case 'appointments': return <AppointmentsScreen {...props} />
+    case 'tests': return <TestsScreen {...props} />
     case 'password': return <SetPasswordScreen {...props} onSaved={(p) => { setPatient(p); finish('Your new password is saved.') }} />
     case 'welcome-new': return <AccountCreated {...props} />
     case 'done': return <DoneScreen {...props} message={doneMessage} />
@@ -89,6 +90,7 @@ export default function Portal() {
 
 const NAV = [
   { key: 'home', label: 'Home', icon: House },
+  { key: 'tests', label: 'My tests', icon: ClipboardList },
   { key: 'appointments', label: 'Appointments', icon: CalendarDays },
   { key: 'sugar', label: 'Sugar reading', icon: Droplet },
   { key: 'refill', label: 'Medicine refill', icon: Pill },
@@ -563,6 +565,7 @@ function AgeScreen({ onSaved, onLater }) {
 /* ============================================================== home */
 
 const ACTIONS = [
+  { key: 'tests', icon: ClipboardList, title: 'My tests', text: 'Tests your doctor asked for, and by when' },
   { key: 'appointments', icon: CalendarDays, title: 'Book an appointment', text: 'Choose a time with your doctor' },
   { key: 'refill', icon: Pill, title: 'My medicine refill', text: 'Send the bill when you buy your medicine' },
   { key: 'sugar', icon: Droplet, title: "Today's sugar reading", text: 'Type the number from your meter' },
@@ -703,6 +706,7 @@ function CareTeamMessages({ go }) {
       {messages.map((m) => {
         const ok = m.kind === 'bill_approved'
         const rebook = m.kind === 'appointment_reschedule'
+        const test = m.kind === 'test_reminder' || m.kind === 'test_rejected'
         return (
           <li key={m.id} className={`rounded-lg border border-l-4 bg-surface px-4 py-3 ${ok ? 'border-line border-l-ok-700' : 'border-line border-l-alert-700'}`}>
             <p className={`flex items-start gap-2 text-base ${ok ? 'text-ink' : 'text-ink'}`}>
@@ -711,7 +715,8 @@ function CareTeamMessages({ go }) {
               <span>{m.message}</span>
             </p>
             <div className="mt-2 flex flex-wrap gap-2 pl-7">
-              {rebook ? <button type="button" onClick={() => { dismiss(m); go('appointments') }} className={b.primary}><CalendarDays size={18} aria-hidden="true" /> Choose a new time</button>
+              {test ? <button type="button" onClick={() => { dismiss(m); go('tests') }} className={b.primary}><ClipboardList size={18} aria-hidden="true" /> Open my tests</button>
+                : rebook ? <button type="button" onClick={() => { dismiss(m); go('appointments') }} className={b.primary}><CalendarDays size={18} aria-hidden="true" /> Choose a new time</button>
                 : !ok && <button type="button" onClick={() => { dismiss(m); go('refill') }} className={b.primary}><Upload size={18} aria-hidden="true" /> Upload a new bill</button>}
               <button type="button" onClick={() => dismiss(m)} className={b.secondary}>OK</button>
             </div>
@@ -1270,6 +1275,154 @@ function DoctorsScreen({ shell, crumbs }) {
         </FormPanel>
       </div>
     </AppShell>
+  )
+}
+
+/* ============================================================== my tests */
+
+// Tests the doctor asked for, soonest first. A test done elsewhere is uploaded from its own card; the care team
+// checks the report before the result counts. Results done at our clinic lab appear on their own.
+function TestsScreen({ shell, crumbs }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState('')
+  const [uploadFor, setUploadFor] = useState(null)
+  const [sent, setSent] = useState('')
+  const load = () => api.myTests().then(setData).catch((e) => setError(e.message))
+  useEffect(() => {
+    load()
+  }, [])
+  const longDay = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+  const uploadable = data?.todo.filter((t) => t.can_upload) ?? []
+
+  return (
+    <AppShell {...shell} title="My tests" breadcrumbs={crumbs({ label: 'My tests' })}
+      subtitle={data?.next_appointment ? <>Next appointment <strong className="text-ink tnum">{longDay(data.next_appointment.date)}</strong></> : null}>
+      <div className="max-w-3xl space-y-4">
+        <Alert>{error}</Alert>
+        {sent && <Success>{sent}</Success>}
+        {data && data.todo.length === 0 && (
+          <Panel large title="Nothing to do"><p className="px-4 py-4 text-base text-muted">Your doctor has not asked for any tests right now.</p></Panel>
+        )}
+        {data?.todo.map((t) => (
+          <article key={t.id} className={`rounded-lg border bg-surface ${t.overdue ? 'border-alert-200' : 'border-line'}`} aria-labelledby={`t-${t.id}`}>
+            <div className="space-y-2 px-4 py-3.5">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h2 id={`t-${t.id}`} className="text-lg font-semibold text-ink">{t.name}</h2>
+                <Badge tone={t.section === 'rejected' ? 'alert' : t.section === 'awaiting_verification' ? 'info' : 'neutral'} className="text-sm!">{t.patient_status_label}</Badge>
+              </div>
+              <p className="text-base text-ink tnum">
+                Do this by <strong>{longDay(t.due_by)}</strong>
+                {t.overdue && <strong className="ml-2 text-alert-800">Overdue</strong>}
+                {t.priority === 'urgent' && <strong className="ml-2 text-ink">Urgent</strong>}
+              </p>
+              {t.fasting_required && <p className="text-base font-semibold text-ink">Fasting needed.</p>}
+              {t.instructions && <p className="text-base text-ink">{t.instructions}</p>}
+              {t.fulfilment_route !== 'external' && t.section !== 'awaiting_verification' && (
+                <p className="text-base text-muted">Get this done at our clinic by {longDay(t.due_by)}. Your results will appear automatically.</p>
+              )}
+              {t.status === 'submitted_by_patient' && <p className="text-base text-ink">Sent for clinician review{t.report_sent_at ? ` on ${formatDate(t.report_sent_at)}` : ''}.</p>}
+              {t.status === 'rejected' && t.status_reason && (
+                <p role="status" className="rounded-md border border-alert-200 bg-alert-50 px-3 py-2 text-base text-alert-800">
+                  Not accepted: {t.status_reason}
+                </p>
+              )}
+              {t.can_upload && uploadFor !== t.id && (
+                <button type="button" onClick={() => { setSent(''); setUploadFor(t.id) }} className={t.status === 'rejected' ? b.primary : b.secondary}>
+                  <Upload size={18} aria-hidden="true" /> {t.status === 'rejected' ? 'Re-upload' : 'I did this test elsewhere'}
+                </button>
+              )}
+            </div>
+            {uploadFor === t.id && (
+              <TestUpload item={t} options={uploadable} onCancel={() => setUploadFor(null)}
+                onSent={(name) => { setUploadFor(null); setSent(`${name}: sent for clinician review.`); load() }} />
+            )}
+          </article>
+        ))}
+        <button type="button" onClick={() => { setSent(''); setUploadFor('other-top') }} className={`${link} text-base`}>Send a report for a test that is not on this list</button>
+        {uploadFor === 'other-top' && (
+          <div className="rounded-lg border border-line bg-surface">
+            <TestUpload item={null} options={uploadable} onCancel={() => setUploadFor(null)}
+              onSent={(name) => { setUploadFor(null); setSent(`${name}: sent for clinician review.`); load() }} />
+          </div>
+        )}
+
+        {data?.done.length > 0 && (
+          <Panel large title="Done" bodyClass="">
+            <ul className="divide-y divide-line">
+              {data.done.map((t) => (
+                <li key={t.id} className="px-4 py-3">
+                  <span className="block text-base font-semibold text-ink">{t.name}</span>
+                  {t.result && <span className="block text-base text-ink tnum">{t.result.value} {t.result.unit} · test on {formatDate(t.result.test_date)}</span>}
+                  <span className="block text-sm text-muted">{t.result?.source === 'clinic_lab_system' ? 'From our clinic lab' : 'Checked by your care team'}</span>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+        )}
+      </div>
+    </AppShell>
+  )
+}
+
+// "I did this test elsewhere": which test (pre-selected, changeable), test date, lab, file - with upload progress.
+function TestUpload({ item, options, onCancel, onSent }) {
+  const [target, setTarget] = useState(item?.id ?? 'other')
+  const [f, setF] = useState({ name: '', date: '', lab: '' })
+  const [file, setFile] = useState(null)
+  const [progress, setProgress] = useState(null)
+  const { busy, error, run } = useSubmit()
+  const [key] = useState(() => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`))
+  const choices = item && !options.some((o) => o.id === item.id) ? [item, ...options] : options
+  const submit = (e) => {
+    e.preventDefault()
+    run(async () => {
+      setProgress(0)
+      try {
+        await api.uploadTestReport(target, { file, test_date: f.date, lab_name: f.lab, custom_name: target === 'other' ? f.name : null }, setProgress, key)
+        onSent(target === 'other' ? f.name : choices.find((o) => o.id === target)?.name)
+      } finally {
+        setProgress(null)
+      }
+    })
+  }
+  const id = item?.id ?? 'other'
+  return (
+    <form onSubmit={submit} className="space-y-4 border-t border-line bg-subtle px-4 py-4">
+      <PField label="Which test is this report for?" htmlFor={`up-test-${id}`}>
+        <select id={`up-test-${id}`} value={target} onChange={(e) => setTarget(e.target.value)} className={field}>
+          {choices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          <option value="other">Other test (not on my list)</option>
+        </select>
+      </PField>
+      {target === 'other' && (
+        <PField label="Name of the test" htmlFor={`up-name-${id}`} required>
+          <input id={`up-name-${id}`} required maxLength={80} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} className={field} />
+        </PField>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <PField label="Date of the test" htmlFor={`up-date-${id}`} required hint="The day the sample was taken">
+          <input id={`up-date-${id}`} type="date" required max={todayIso()} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} className={field} />
+        </PField>
+        <PField label="Lab name" htmlFor={`up-lab-${id}`} required>
+          <input id={`up-lab-${id}`} required maxLength={120} value={f.lab} onChange={(e) => setF({ ...f, lab: e.target.value })} className={field} />
+        </PField>
+      </div>
+      <PField label="Report (PDF, JPG or PNG)" htmlFor={`up-file-${id}`} required>
+        <input id={`up-file-${id}`} type="file" required accept="application/pdf,image/jpeg,image/png" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="block w-full text-base text-ink file:mr-3 file:h-11 file:rounded-md file:border file:border-line-strong file:bg-surface file:px-4 file:text-base file:font-semibold" />
+      </PField>
+      {progress !== null && (
+        <div role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Upload progress">
+          <div className="h-2 overflow-hidden rounded bg-line"><div className="h-full bg-brand-600" style={{ width: `${progress}%` }} /></div>
+          <p className="mt-1 text-sm text-muted tnum">Uploading… {progress}%</p>
+        </div>
+      )}
+      <Alert>{error}</Alert>
+      <div className="flex flex-col-reverse gap-2 sm:flex-row">
+        <button type="button" onClick={onCancel} className={b.secondary}>Cancel</button>
+        <button type="submit" disabled={busy || !file} className={b.primary}>{busy ? 'Sending…' : 'Submit'}</button>
+      </div>
+    </form>
   )
 }
 

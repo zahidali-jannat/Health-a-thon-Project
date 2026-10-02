@@ -17,9 +17,9 @@ def _set_cookie(response: Response, name: str, token: str, hours: int) -> None:
                         secure=not get_settings().is_dev, path="/")
 
 
-def _public(user: dict) -> dict:
+def _public(user: dict, conn) -> dict:
     return {"clinician_code": user["clinician_code"], "full_name": user["full_name"], "phone": user["phone"],
-            "theme": user.get("theme") or "light"}
+            "theme": user.get("theme") or "light", "role": user.get("role") or "doctor", "clinic_name": repo.clinic_name(conn)}
 
 
 # ------------------------------------------------------------------ clinicians
@@ -28,6 +28,7 @@ class SignupIn(BaseModel):
     full_name: str = Field(max_length=120)
     phone: str = Field(max_length=20)
     password: str = Field(max_length=200)
+    role: Literal["doctor", "care_team"] = "doctor"     # a doctor, or a member of the clinic team
 
 
 class LoginIn(BaseModel):
@@ -38,14 +39,14 @@ class LoginIn(BaseModel):
 @router.post("/clinician/signup")
 def clinician_signup(body: SignupIn, response: Response, conn=Depends(get_conn)):
     try:
-        user = repo.create_clinician(conn, body.full_name, body.phone, body.password)
+        user = repo.create_clinician(conn, body.full_name, body.phone, body.password, role=body.role)
     except repo.RepoError as e:
         raise HTTPException(422, str(e))
     repo.audit(conn, repo.clinician_actor(user), "ACCOUNT_CREATED", resource_type="clinical_user", resource_id=user["id"])
     hours = get_settings().clinician_session_hours
     _set_cookie(response, CLINICIAN_COOKIE, repo.create_session(conn, hours, clinical_user_id=user["id"]), hours)
     conn.commit()
-    return _public(user)
+    return _public(user, conn)
 
 
 @router.post("/clinician/login")
@@ -61,7 +62,7 @@ def clinician_login(body: LoginIn, response: Response, conn=Depends(get_conn)):
     hours = get_settings().clinician_session_hours
     _set_cookie(response, CLINICIAN_COOKIE, repo.create_session(conn, hours, clinical_user_id=user["id"]), hours)
     conn.commit()
-    return _public(user)
+    return _public(user, conn)
 
 
 @router.post("/clinician/logout")
@@ -74,8 +75,8 @@ def clinician_logout(request: Request, response: Response, conn=Depends(get_conn
 
 
 @router.get("/clinician/me")
-def clinician_me(user: dict = Depends(current_clinician)):
-    return _public(user)
+def clinician_me(user: dict = Depends(current_clinician), conn=Depends(get_conn)):
+    return _public(user, conn)
 
 
 class AccountIn(BaseModel):
@@ -95,7 +96,7 @@ def update_account(body: AccountIn, user: dict = Depends(current_clinician), con
         repo.audit(conn, repo.clinician_actor(updated), "ACCOUNT_UPDATED", resource_type="clinical_user",
                    resource_id=user["id"], detail="Changed " + ", ".join(c.replace("_", " ") for c in changed))
     conn.commit()
-    return _public(updated)
+    return _public(updated, conn)
 
 
 class PasswordChangeIn(BaseModel):

@@ -198,6 +198,6 @@ def test_old_single_day_blocks_convert_exactly(tmp_path, monkeypatch):
                  "VALUES ('d', '2026-09-30', '09:10', '10:00', 'u', 'x')")
     conn.commit()
     monkeypatch.setattr(db, "MIGRATIONS_DIR", real)
-    assert db.migrate(conn) == ["0012_unavailability_utc_range"]
+    assert db.migrate(conn)[0] == "0012_unavailability_utc_range"                # later migrations may follow
     assert tuple(conn.execute("SELECT starts_at, ends_at FROM doctor_unavailability").fetchone()) == \
         ("2026-09-30T03:40:00Z", "2026-09-30T04:30:00Z")

@@ -67,7 +67,7 @@ export function DocumentViewer({ report: r, url: fileUrl, label, height = 'h-[70
 const row = 'flex justify-between gap-3 py-2 text-sm'
 
 function ValueForm({ report: r, onDone }) {
-  const other = r.test_type === 'Other'
+  const other = r.test_type === 'Other' && !r.expected_unit     // an ordered test brings its own unit
   const [value, setValue] = useState('')
   const [unit, setUnit] = useState('')
   const [changingDate, setChangingDate] = useState(false)
@@ -123,6 +123,11 @@ function ValueForm({ report: r, onDone }) {
       <div className="px-4 pb-4">
         <dl className="divide-y divide-line">
           <div className={row}><dt className="text-muted">Test type</dt><dd className="font-medium text-ink">{r.test_label}</dd></div>
+          {r.test_order_item_id && (
+            <div className={row}><dt className="text-muted">Answers order</dt>
+              <dd className="text-right text-ink">{r.order_test_name}<span className="block text-xs text-muted tnum">due {formatDate(r.order_due_by)}</span></dd></div>
+          )}
+          {r.lab_name && <div className={row}><dt className="text-muted">Lab</dt><dd className="text-right text-ink">{r.lab_name}</dd></div>}
           <div className={row}>
             <dt className="text-muted">Test date</dt>
             <dd className="text-right">
@@ -180,11 +185,12 @@ function ValueForm({ report: r, onDone }) {
             </button>
           ) : (
             <div className="rounded-md border border-alert-200 bg-alert-50 p-3">
-              <label htmlFor="ext-reason" className="block text-sm font-medium text-ink">Why can’t it be used? <span className="font-normal text-muted">(optional)</span></label>
+              <label htmlFor="ext-reason" className="block text-sm font-medium text-ink">Why can’t it be used?{' '}
+                <span className="font-normal text-muted">{r.test_order_item_id ? '(the patient sees this and uploads again)' : '(optional)'}</span></label>
               <input id="ext-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200}
                 placeholder="e.g. Photo is blurred, wrong patient" className={`${input} mt-1`} />
               <div className="mt-2 flex gap-2">
-                <button type="button" disabled={busy} onClick={reject} className={btn.danger}>Mark as not usable</button>
+                <button type="button" disabled={busy || (r.test_order_item_id && reason.trim().length < 3)} onClick={reject} className={btn.danger}>Mark as not usable</button>
                 <button type="button" onClick={() => setRejecting(false)} className={btn.secondary}>Back</button>
               </div>
               <p className="mt-2 text-xs text-muted">No value is saved. The patient sees that the report wasn’t accepted.</p>

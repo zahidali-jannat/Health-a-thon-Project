@@ -80,6 +80,8 @@ DEMO_CLINICIANS = [
     # A real account with NO patients assigned - demonstrates isolation. Different hours, slot length and buffer.
     dict(code="CLN-KRNB58", name="Dr. Karan Bhatia", phone="9800000002", patients=[],
          hours=("10:00", "14:00", 20, 10)),
+    # The clinic team (a shared desk login, no phone): sees every patient of the clinic, prepares and sends briefs.
+    dict(code="CLN-TNSQ01", name="Tanishq Clinic Management", phone=None, patients=[], role="care_team"),
 ]
 
 # A tiny valid PDF so the demo has a real patient-uploaded file to open.
@@ -164,14 +166,16 @@ def _insert_patient(conn: sqlite3.Connection, spec: dict, today: date, rng: rand
     return pid
 
 
-def seed_database(conn: sqlite3.Connection, today: date) -> dict[str, str]:
-    """Load the development fixtures into an EMPTY, migrated database. Returns {patient_code: id}."""
+def seed_database(conn: sqlite3.Connection, today: date, brief_demo: bool = False) -> dict[str, str]:
+    """Load the development fixtures into an EMPTY, migrated database. Returns {patient_code: id}.
+    brief_demo: also the Consultation Brief demo (a new patient and three appointments today) - the demo seed only."""
     if conn.execute("SELECT COUNT(*) FROM patients").fetchone()[0]:
         raise RuntimeError("Refusing to seed: the database already has patients.")
     ids = {spec["code"]: _insert_patient(conn, spec, today, random.Random(1000 + i))
            for i, spec in enumerate(DEMO_PATIENTS)}
     for c in DEMO_CLINICIANS:
-        user = repo.create_clinician(conn, c["name"], c["phone"], DEMO_PASSWORD, clinician_code=c["code"])
+        user = repo.create_clinician(conn, c["name"], c["phone"], DEMO_PASSWORD, clinician_code=c["code"],
+                                     role=c.get("role", "doctor"))
         for code in c["patients"]:
             repo.grant_access(conn, user["id"], ids[code], granted_by=None)
         if c.get("hours"):
@@ -184,8 +188,36 @@ def seed_database(conn: sqlite3.Connection, today: date) -> dict[str, str]:
                                "patient_upload", description="Lipid profile", uploaded_by_patient_id=ids["P-1001"])
     repo.create_lab_report(conn, ids["P-1001"], "Uploaded by patient", today, "patient_upload", document_id=doc,
                            report_type="Lipid profile")
+    if brief_demo:
+        ids.update(_brief_demo(conn, ids, today))
     conn.commit()
     return ids
+
+
+# Consultation Brief demo: today Dr. Priya Nair sees a worsening patient (Ramesh), a stable one (Lakshmi) and a new
+# patient with almost no history (Arjun). Real rows, made the same way the app makes them.
+NEW_PATIENT = dict(code="P-1004", name="Arjun Mehta", phone="9000000004", birth_year=1985, sex="M")
+
+
+def _brief_demo(conn: sqlite3.Connection, ids: dict[str, str], today: date) -> dict[str, str]:
+    from . import appointments as appt
+    new_id = repo.create_patient(conn, NEW_PATIENT["name"], NEW_PATIENT["phone"], date_of_birth=f"{NEW_PATIENT['birth_year']}-07-02",
+                                 sex=NEW_PATIENT["sex"], patient_code=NEW_PATIENT["code"],
+                                 password_hash=security.hash_password(DEMO_PASSWORD))["id"]
+    priya_user = conn.execute("SELECT id FROM clinical_users WHERE clinician_code = 'CLN-PRYA27'").fetchone()[0]
+    repo.grant_access(conn, priya_user, new_id, granted_by=None)
+    repo.insert_event(conn, new_id, "vital", today, "hospital_internal", "high", "resulted", CLINIC,
+                      name="Weight", value=71.5, unit="kg")             # all we know about him: today's weight
+    doctor = appt.doctor_for_user(conn, priya_user)
+    appt.ensure_day(conn, doctor, today.isoformat())
+    for code, hm in (("P-1001", "10:00"), ("P-1002", "10:20"), ("P-1004", "10:40")):
+        slot = conn.execute("SELECT id FROM appointment_slots WHERE doctor_id = ? AND date = ? AND start_time = ?",
+                            (doctor["id"], today.isoformat(), hm)).fetchone()[0]
+        conn.execute("UPDATE appointment_slots SET status = 'booked' WHERE id = ?", (slot,))
+        now = db.now_iso()
+        conn.execute("INSERT INTO appointments (id, slot_id, patient_id, doctor_id, status, booked_at, updated_at) "
+                     "VALUES (?, ?, ?, ?, 'confirmed', ?, ?)", (repo.new_id(), slot, ids.get(code, new_id), doctor["id"], now, now))
+    return {"P-1004": new_id}
 
 
 def main() -> None:
@@ -201,14 +233,17 @@ def main() -> None:
 
     shutil.rmtree(settings.storage_dir, ignore_errors=True)
     conn = db.reset()
-    ids = seed_database(conn, args.today)
+    ids = seed_database(conn, args.today, brief_demo=True)
     print(f"Reset {settings.db_path} and loaded demo fixtures (today = {args.today})\n")
     for table in ("patients", "clinical_users", "care_team_assignments", "clinical_events", "lab_reports",
                   "lab_test_results", "patient_documents"):
         print(f"  {table:<22} {conn.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]:>5}")
     print("\n  Clinician logins (password: demo1234):")
     for c in DEMO_CLINICIANS:
-        print(f"    {c['code']}  {c['name']:<18} phone {c['phone']}  patients: {', '.join(c['patients']) or 'none'}")
+        if c.get("role") == "care_team":
+            print(f"    {c['code']}  {c['name']}  clinic team - every patient of the clinic")
+        else:
+            print(f"    {c['code']}  {c['name']:<18} phone {c['phone']}  patients: {', '.join(c['patients']) or 'none'}")
     print()
     for code, pid in ids.items():
         a = assess_patient(repo.load_patient_record(conn, pid), args.today)

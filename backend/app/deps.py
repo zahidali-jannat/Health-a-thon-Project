@@ -45,6 +45,20 @@ def current_clinician(request: Request, conn=Depends(get_conn)) -> dict:
     return user
 
 
+def current_care_team(user: dict = Depends(current_clinician)) -> dict:
+    """Clinic-team work (preparing and sending briefs). Doctors have their own dashboard."""
+    if user.get("role") != "care_team":
+        raise HTTPException(403, "This is for the clinic team. Doctors see briefs on their own dashboard.")
+    return user
+
+
+def current_doctor(user: dict = Depends(current_clinician)) -> dict:
+    """The doctor dashboard and a doctor's own consultation hours."""
+    if user.get("role") != "doctor":
+        raise HTTPException(403, "This is for doctors only.")
+    return user
+
+
 def current_patient_session(request: Request, conn=Depends(get_conn)) -> dict:
     """Signed-in patient, even if they still have to choose a password (used by /me and set-password)."""
     token = request.cookies.get(PATIENT_COOKIE)

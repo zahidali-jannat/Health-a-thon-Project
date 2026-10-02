@@ -131,23 +131,31 @@ def set_reported_age(conn, patient_id: str, years: int, on: date) -> None:
 
 # ================================================================== clinicians & access
 
-def create_clinician(conn, full_name: str, phone: str, password: str, clinician_code: str | None = None) -> dict:
-    """clinician_code is only passed by dev fixtures; real sign-ups always get a generated one."""
-    phone_n = security.normalize_phone(phone)
+ROLES = ("doctor", "care_team")
+
+
+def create_clinician(conn, full_name: str, phone: str | None, password: str, clinician_code: str | None = None,
+                     role: str = "doctor") -> dict:
+    """clinician_code is only passed by dev fixtures; real sign-ups always get a generated one.
+    A clinic-team login may have no phone (a shared desk account); a doctor always has one."""
+    if role not in ROLES:
+        raise RepoError("Unknown account type.")
+    phone_n = security.normalize_phone(phone) if phone else ""
     if len(full_name.strip()) < 2:
         raise RepoError("Please enter your full name.")
-    if not phone_n:
+    if not phone_n and (phone or role == "doctor"):
         raise RepoError("Please enter a 10-digit phone number.")
     if len(password) < 8:
         raise RepoError("Password must be at least 8 characters.")
-    if conn.execute("SELECT 1 FROM clinical_users WHERE phone = ?", (phone_n,)).fetchone():
+    if phone_n and conn.execute("SELECT 1 FROM clinical_users WHERE phone = ?", (phone_n,)).fetchone():
         raise RepoError("An account with this phone number already exists. Please sign in.")
     uid, now, pw = new_id(), now_iso(), security.hash_password(password)
     for _ in range(10):   # the UNIQUE index guarantees no duplicates; retry on the (rare) random clash
         try:
-            conn.execute("INSERT INTO clinical_users (id, clinician_code, full_name, phone, password_hash, created_at, updated_at) "
-                         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                         (uid, clinician_code or security.new_clinician_code(), full_name.strip(), phone_n, pw, now, now))
+            conn.execute("INSERT INTO clinical_users (id, clinician_code, full_name, phone, password_hash, role, created_at, updated_at) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                         (uid, clinician_code or security.new_clinician_code(), full_name.strip(), phone_n or None, pw, role,
+                          now, now))
             return get_clinician(conn, uid)
         except sqlite3.IntegrityError as e:
             if "clinician_code" not in str(e):
@@ -156,9 +164,14 @@ def create_clinician(conn, full_name: str, phone: str, password: str, clinician_
 
 
 def get_clinician(conn, user_id: str) -> dict | None:
-    row = conn.execute("SELECT id, clinician_code, full_name, phone, is_active, theme, created_at FROM clinical_users "
+    row = conn.execute("SELECT id, clinician_code, full_name, phone, is_active, theme, role, created_at FROM clinical_users "
                        "WHERE id = ?", (user_id,)).fetchone()
     return dict(row) if row else None
+
+
+def clinic_name(conn) -> str:
+    row = conn.execute("SELECT name FROM clinic_profile WHERE id = 1").fetchone()
+    return row[0] if row else "Clinic team"
 
 
 def find_clinician_for_login(conn, identifier: str) -> dict | None:
@@ -222,9 +235,19 @@ def clinician_actor(user: dict) -> Actor:
     return Actor("clinical_user", user["id"], f"{user['full_name']} ({user['clinician_code']})")
 
 
+# The clinic team sees every patient of the clinic: anyone with at least one active care-team assignment.
+# A doctor sees only the patients on their own care team. VISIBLE_SQL needs the viewer's id twice.
+VISIBLE_SQL = ("(EXISTS (SELECT 1 FROM care_team_assignments c WHERE c.patient_id = {p} AND c.clinical_user_id = ? "
+               "AND c.revoked_at IS NULL) OR (EXISTS (SELECT 1 FROM clinical_users v WHERE v.id = ? AND v.role = 'care_team') "
+               "AND EXISTS (SELECT 1 FROM care_team_assignments c2 WHERE c2.patient_id = {p} AND c2.revoked_at IS NULL)))")
+
+
+def visible_sql(patient_column: str) -> str:
+    return VISIBLE_SQL.format(p=patient_column)
+
+
 def has_access(conn, user_id: str, patient_id: str) -> bool:
-    return conn.execute("SELECT 1 FROM care_team_assignments WHERE clinical_user_id = ? AND patient_id = ? "
-                        "AND revoked_at IS NULL", (user_id, patient_id)).fetchone() is not None
+    return conn.execute(f"SELECT {visible_sql('?')}", (patient_id, user_id, user_id, patient_id)).fetchone()[0] == 1
 
 
 def grant_access(conn, user_id: str, patient_id: str, granted_by: str | None) -> None:
@@ -234,8 +257,9 @@ def grant_access(conn, user_id: str, patient_id: str, granted_by: str | None) ->
 
 
 def patient_ids_for_clinician(conn, user_id: str) -> list[str]:
-    return [r[0] for r in conn.execute("SELECT patient_id FROM care_team_assignments WHERE clinical_user_id = ? "
-                                       "AND revoked_at IS NULL", (user_id,))]
+    return [r[0] for r in conn.execute("SELECT DISTINCT a.patient_id FROM care_team_assignments a WHERE a.revoked_at IS NULL "
+                                       "AND (a.clinical_user_id = ? OR EXISTS (SELECT 1 FROM clinical_users v "
+                                       "WHERE v.id = ? AND v.role = 'care_team'))", (user_id, user_id))]
 
 
 def care_team(conn, patient_id: str) -> list[dict]:
@@ -544,7 +568,8 @@ def external_test_label(test_type: str, test_name: str | None) -> str:
 
 
 def create_external_report(conn, patient_id: str, test_type: str, test_date: date, file_name: str,
-                           content_type: str, data: bytes, test_name: str | None = None) -> str:
+                           content_type: str, data: bytes, test_name: str | None = None,
+                           test_order_item_id: str | None = None, lab_name: str | None = None) -> str:
     """Stores the file, then its row (status pending_review). If the row can't be written, the file is removed."""
     if test_type not in EXTERNAL_TESTS:
         raise RepoError("Please choose the test type.")
@@ -554,10 +579,11 @@ def create_external_report(conn, patient_id: str, test_type: str, test_date: dat
     try:
         conn.execute(
             "INSERT INTO external_reports (id, patient_id, uploaded_by_patient_id, upload_date, test_type, test_name, "
-            "test_date, file_name, content_type, size_bytes, sha256, storage_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "test_date, file_name, content_type, size_bytes, sha256, storage_key, test_order_item_id, lab_name) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (report_id, patient_id, patient_id, now_iso(), test_type, test_name if test_type == "Other" else None,
              test_date.isoformat(), (file_name or "report")[:200], content_type, len(data),
-             hashlib.sha256(data).hexdigest(), key))
+             hashlib.sha256(data).hexdigest(), key, test_order_item_id, lab_name))
     except Exception:
         storage.delete(key)
         raise
@@ -569,8 +595,11 @@ _EXT_SELECT = (
     "x.test_type, x.test_name, x.test_date, x.upload_date, x.file_name, x.content_type, "
     "x.storage_key, x.status, x.reviewed_at, x.reject_reason, r.full_name AS reviewed_by_name, "
     "p.full_name AS patient_name, p.patient_code, e.id AS event_id, e.name AS result_name, e.value, e.unit, "
-    "e.effective_date AS result_date FROM external_reports x JOIN patients p ON p.id = x.patient_id "
-    "LEFT JOIN clinical_users r ON r.id = x.reviewed_by LEFT JOIN clinical_events e ON e.linked_document_id = x.id ")
+    "e.effective_date AS result_date, x.test_order_item_id, x.lab_name, oc.display_name AS order_test_name, "
+    "oc.expected_unit AS order_unit, oc.plausible_low AS order_low, oc.plausible_high AS order_high, "
+    "oi.due_by AS order_due_by FROM external_reports x JOIN patients p ON p.id = x.patient_id "
+    "LEFT JOIN clinical_users r ON r.id = x.reviewed_by LEFT JOIN clinical_events e ON e.linked_document_id = x.id "
+    "LEFT JOIN test_order_items oi ON oi.id = x.test_order_item_id LEFT JOIN test_catalog oc ON oc.id = oi.test_catalog_id ")
 
 
 def _external(row) -> dict:
@@ -581,6 +610,8 @@ def _external(row) -> dict:
         return d
     d["test_label"] = external_test_label(d["test_type"], d["test_name"])
     name, unit, lo, hi = EXTERNAL_TESTS[d["test_type"]]
+    if unit is None and d.get("order_unit"):          # an "Other" upload answering a test order: the ordered test's unit
+        unit, lo, hi = d["order_unit"], d["order_low"], d["order_high"]
     d["expected_unit"], d["plausible_low"], d["plausible_high"] = unit, lo, hi
     return d
 
@@ -828,7 +859,8 @@ def send_email(to: str | None, subject: str, body: str) -> None:
 
 def list_notifications(conn, patient_id: str, limit: int = 20) -> list[dict]:
     return [dict(r) for r in conn.execute(
-        "SELECT id, kind, document_id, message, email_to, email_status, created_at, read_at FROM patient_notifications "
+        "SELECT id, kind, document_id, appointment_id, test_order_item_id, message, email_to, email_status, created_at, "
+        "read_at FROM patient_notifications "
         "WHERE patient_id = ? ORDER BY created_at DESC, id DESC LIMIT ?", (patient_id, limit))]
 
 

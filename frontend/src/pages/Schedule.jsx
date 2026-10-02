@@ -53,7 +53,7 @@ export default function Schedule() {
       {doctors && doctors.length === 0 ? (
         <Panel title="No doctors take appointments yet">
           <p className="px-4 py-4 text-sm text-muted">
-            A doctor sets their hours in <Link to="/care-team/settings/consultation-hours" className="font-medium text-brand-700 hover:underline">Settings → Consultation hours</Link>.
+            A doctor sets their hours on their own dashboard, in Settings → Consultation hours.
           </p>
         </Panel>
       ) : (<>

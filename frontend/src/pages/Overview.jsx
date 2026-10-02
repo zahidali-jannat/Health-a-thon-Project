@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, daysBetween, formatDate, formatDateTime } from '../api.js'
 import { useClinician } from '../auth.jsx'
 import AddPatientDialog from '../components/AddPatient.jsx'
+import { OverdueTestsPanel } from '../components/TestOrders.jsx'
 import { AppShell, Badge, btn, ErrorBox, Panel, StatusBadge, td, th } from '../components/ui.jsx'
 import { mainConcern } from './Patients.jsx'
 
@@ -155,6 +156,8 @@ export default function Overview() {
                   </div>
                 </>) : null}
               </Panel>
+
+              <OverdueTestsPanel />
             </div>
 
             <div className="space-y-4">

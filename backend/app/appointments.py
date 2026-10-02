@@ -124,13 +124,14 @@ def _in_past(day: str, start: str, today: date, now_hm: str) -> bool:
 # ------------------------------------------------------------------ doctors
 
 def ensure_doctors(conn, user_ids: list[str] | None = None) -> None:
-    """Every active clinician takes appointments: one without saved hours gets DEFAULT_HOURS the first time
-    they are needed (booking works with no setup step). Idempotent - clinical_user_id is UNIQUE. Caller commits."""
+    """Every active doctor takes appointments: one without saved hours gets DEFAULT_HOURS the first time
+    they are needed (booking works with no setup step). Clinic-team accounts never do.
+    Idempotent - clinical_user_id is UNIQUE. Caller commits."""
     where, args = ("AND u.id IN (%s)" % ",".join("?" * len(user_ids)), user_ids) if user_ids is not None else ("", [])
     if user_ids is not None and not user_ids:
         return
     start, end, length, buffer = DEFAULT_HOURS
-    for r in conn.execute(f"SELECT u.id, u.full_name FROM clinical_users u WHERE u.is_active = 1 {where} "
+    for r in conn.execute(f"SELECT u.id, u.full_name FROM clinical_users u WHERE u.is_active = 1 AND u.role = 'doctor' {where} "
                           "AND NOT EXISTS (SELECT 1 FROM doctors d WHERE d.clinical_user_id = u.id)", args).fetchall():
         conn.execute("INSERT OR IGNORE INTO doctors (id, clinical_user_id, name, working_start_time, working_end_time, "
                      "slot_duration_minutes, buffer_minutes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -154,9 +155,13 @@ def list_doctors(conn) -> list[dict]:
 
 
 def bookable_doctors(conn, patient_id: str) -> list[dict]:
-    """A patient books with the doctors on their own care team."""
-    ensure_doctors(conn, [r[0] for r in conn.execute(
-        "SELECT clinical_user_id FROM care_team_assignments WHERE patient_id = ? AND revoked_at IS NULL", (patient_id,))])
+    """A patient books with the doctors on their own care team. A patient the clinic team looks after
+    (registered or linked by the team) may book any of the clinic's doctors."""
+    team = conn.execute("SELECT u.id, u.role FROM care_team_assignments a JOIN clinical_users u ON u.id = a.clinical_user_id "
+                        "WHERE a.patient_id = ? AND a.revoked_at IS NULL AND u.is_active = 1", (patient_id,)).fetchall()
+    if any(r["role"] == "care_team" for r in team):
+        return list_doctors(conn)
+    ensure_doctors(conn, [r["id"] for r in team])
     return [dict(r) for r in conn.execute(
         "SELECT d.* FROM doctors d JOIN care_team_assignments a ON a.clinical_user_id = d.clinical_user_id "
         "WHERE a.patient_id = ? AND a.revoked_at IS NULL ORDER BY d.name", (patient_id,))]
@@ -482,11 +487,10 @@ def plan_block(conn, doctor: dict, block: dict, viewer_id: str, today: date, now
     for d, seg_s, seg_e in segments:
         booked = conn.execute(
             "SELECT s.id, s.start_time, s.end_time, s.status, a.id AS appointment_id, a.status AS appointment_status, "
-            "p.full_name, EXISTS (SELECT 1 FROM care_team_assignments c WHERE c.patient_id = a.patient_id "
-            "AND c.clinical_user_id = ? AND c.revoked_at IS NULL) AS visible "
+            f"p.full_name, {repo.visible_sql('a.patient_id')} AS visible "
             "FROM appointment_slots s LEFT JOIN appointments a ON a.slot_id = s.id AND a.status <> 'cancelled' "
             "LEFT JOIN patients p ON p.id = a.patient_id WHERE s.doctor_id = ? AND s.date = ? ORDER BY s.start_time",
-            (viewer_id, doctor["id"], d)).fetchall()
+            (viewer_id, viewer_id, doctor["id"], d)).fetchall()
         marks = []
         for r in booked:
             inside = r["start_time"] < seg_e and r["end_time"] > seg_s
@@ -577,12 +581,11 @@ def notices(conn, doctor_id: str, viewer_id: str) -> list[dict]:
     rows = conn.execute(
         "SELECT n.id, n.status, n.message, n.sent_at, n.created_at, a.id AS appointment_id, a.patient_id, "
         "s.date, s.start_time, s.end_time, p.full_name, p.patient_code, "
-        "EXISTS (SELECT 1 FROM care_team_assignments c WHERE c.patient_id = a.patient_id AND c.clinical_user_id = ? "
-        "        AND c.revoked_at IS NULL) AS visible "
+        f"{repo.visible_sql('a.patient_id')} AS visible "
         "FROM appointment_notices n JOIN appointments a ON a.id = n.appointment_id "
         "JOIN appointment_slots s ON s.id = a.slot_id JOIN patients p ON p.id = a.patient_id "
         "WHERE a.doctor_id = ? AND a.status = 'needs_reschedule' ORDER BY s.date, s.start_time, n.id",
-        (viewer_id, doctor_id)).fetchall()
+        (viewer_id, viewer_id, doctor_id)).fetchall()
     out = []
     for r in rows:
         n = dict(r)
@@ -655,11 +658,10 @@ def schedule(conn, doctor: dict, day: str, viewer_id: str, today: date) -> dict:
     slots = conn.execute(
         "SELECT s.id, s.start_time, s.end_time, s.status, a.id AS appointment_id, a.status AS appointment_status, "
         "a.booked_at, a.patient_id, p.full_name, p.patient_code, "
-        "EXISTS (SELECT 1 FROM care_team_assignments c WHERE c.patient_id = a.patient_id AND c.clinical_user_id = ? "
-        "        AND c.revoked_at IS NULL) AS visible "
+        f"{repo.visible_sql('a.patient_id')} AS visible "
         "FROM appointment_slots s LEFT JOIN appointments a ON a.slot_id = s.id AND a.status <> 'cancelled' "
         "LEFT JOIN patients p ON p.id = a.patient_id WHERE s.doctor_id = ? AND s.date = ? ORDER BY s.start_time",
-        (viewer_id, doctor["id"], day)).fetchall()
+        (viewer_id, viewer_id, doctor["id"], day)).fetchall()
     out = []
     for r in slots:
         s = dict(r)

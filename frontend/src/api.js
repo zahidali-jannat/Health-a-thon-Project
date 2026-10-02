@@ -37,7 +37,7 @@ const postForm = (path, fields) => {
 
 export const api = {
   // clinician account
-  clinicianSignup: (full_name, phone, password) => postJson('/auth/clinician/signup', { full_name, phone, password }),
+  clinicianSignup: (full_name, phone, password, role) => postJson('/auth/clinician/signup', { full_name, phone, password, role }),
   clinicianLogin: (identifier, password) => postJson('/auth/clinician/login', { identifier, password }),
   clinicianLogout: () => postJson('/auth/clinician/logout'),
   clinicianMe: () => request('/auth/clinician/me'),
@@ -156,8 +156,73 @@ export const api = {
   reportFileLink: (patientId, reportId) => postJson(`/patients/${patientId}/uploaded-reports/${reportId}/file-link`),
   editManualValue: (patientId, eventId, body) => patchJson(`/patients/${patientId}/manual-values/${eventId}`, body),
   manualValues: (patientId) => request(`/patients/${patientId}/manual-values`),
+
+  // test orders - care team
+  testCatalog: () => request('/test-catalog'),
+  patientTestOrders: (patientId) => request(`/patients/${patientId}/test-orders`),
+  previewTestOrder: (patientId, body) => postJson(`/patients/${patientId}/test-orders/preview`, body),
+  createTestOrder: (patientId, body, idempotencyKey) => request(`/patients/${patientId}/test-orders`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(body),
+  }),
+  editTestItem: (itemId, body) => patchJson(`/test-order-items/${itemId}`, body),
+  cancelTestItem: (itemId, version, reason) => postJson(`/test-order-items/${itemId}/cancel`, { version, reason }),
+  waiveTestItem: (itemId, version, reason) => postJson(`/test-order-items/${itemId}/waive`, { version, reason }),
+  closeTestItem: (itemId, version) => postJson(`/test-order-items/${itemId}/close`, { version }),
+  acceptLabResult: (patientId, ingestionId, itemId) =>
+    postJson(`/patients/${patientId}/lab-results/${ingestionId}/accept`, { test_order_item_id: itemId || null }),
+  rejectLabResult: (patientId, ingestionId, reason) => postJson(`/patients/${patientId}/lab-results/${ingestionId}/reject`, { reason }),
+  demoLabResult: (patientId, itemId, value) =>
+    postJson(`/patients/${patientId}/test-orders/demo-lab-result`, { test_order_item_id: itemId, value }),
+  overdueTests: (params = {}) => request(`/clinic/tests/overdue?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== '' && v != null))}`),
+  fhir: (patientId, type) => request(`/patients/${patientId}/fhir/${type}`),
+  // consultation brief - clinical team
+  briefsForDay: (day) => request(`/clinic/briefs/today${day ? `?day=${day}` : ''}`),
+  draftBrief: (appointmentId) => postJson(`/appointments/${appointmentId}/brief/draft`),
+  brief: (briefId) => request(`/briefs/${briefId}`),
+  editBrief: (briefId, body) => patchJson(`/briefs/${briefId}`, body),
+  sendBrief: (briefId, allowNotToday = false) => postJson(`/briefs/${briefId}/send`, { allow_not_today: allowNotToday }),
+  sendReady: (briefIds) => postJson('/clinic/briefs/send-ready', briefIds ? { brief_ids: briefIds } : {}),
+  // consultation brief - doctor
+  doctorQueue: () => request('/doctor/queue'),
+  doctorInbox: () => request('/doctor/inbox'),
+  callPatient: (briefId) => postJson(`/doctor/briefs/${briefId}/call`),
+  confirmIdentity: (briefId, body) => postJson(`/doctor/briefs/${briefId}/confirm-identity`, body),
+  doctorBrief: (briefId) => request(`/doctor/briefs/${briefId}`),
+  acknowledgeBrief: (briefId) => postJson(`/doctor/briefs/${briefId}/acknowledge`),
+  completeBrief: (briefId) => postJson(`/doctor/briefs/${briefId}/complete`),
+  briefUpdates: (briefId) => request(`/doctor/briefs/${briefId}/updates`),
+  // test orders - patient
+  myTests: () => request('/me/test-orders'),
+  uploadTestReport: (itemId, fields, onProgress, idempotencyKey) =>
+    uploadWithProgress(`/me/test-orders/${itemId}/upload`, fields, onProgress, { 'Idempotency-Key': idempotencyKey }),
   rejectExternalReport: (patientId, reportId, reason) =>
     postJson(`/patients/${patientId}/external-reports/${reportId}/reject`, { reason: reason || null }),
+}
+
+// A multipart POST that reports upload progress (fetch can't), with the same error shape as `request`.
+function uploadWithProgress(path, fields, onProgress, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    Object.entries(fields).forEach(([k, v]) => v != null && v !== '' && form.append(k, v))
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `/api${path}`)
+    xhr.withCredentials = true
+    Object.entries(headers).forEach(([k, v]) => v && xhr.setRequestHeader(k, v))
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100)) }
+    xhr.onload = () => {
+      let body = {}
+      try { body = JSON.parse(xhr.responseText) } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body)
+      const d = body.detail
+      const err = new Error(Array.isArray(d) ? 'Please check what you entered and try again.'
+        : (d && typeof d === 'object' ? d.message : d) || 'The upload failed. Please try again.')
+      err.status = xhr.status
+      err.code = d?.code
+      reject(err)
+    }
+    xhr.onerror = () => reject(new Error('Cannot reach the server. Please check your connection and try again.'))
+    xhr.send(form)
+  })
 }
 
 export function formatDate(iso) {

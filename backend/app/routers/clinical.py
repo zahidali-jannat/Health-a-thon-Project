@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from .. import abdm_mock as abdm
 from .. import appointments as appt
 from .. import report_links as rl
+from .. import orders as test_orders
 from .. import labs, ratelimit, repo, security, storage
 from ..config import DEFAULT_CONFIG
 from ..deps import current_clinician, get_conn, now, patient_for_clinician, today
@@ -293,7 +294,8 @@ def _external_out(x: dict) -> dict:
     out = {k: x[k] for k in ("id", "patient_id", "patient_name", "patient_code", "document_type", "test_type", "test_name",
                              "test_label", "test_date", "upload_date", "content_type", "status", "reviewed_by_name",
                              "reviewed_at", "reject_reason", "reject_code", "purchase_date", "disease", "expected_unit",
-                             "plausible_low", "plausible_high")}
+                             "plausible_low", "plausible_high", "test_order_item_id", "lab_name", "order_test_name",
+                             "order_due_by")}
     out["result"] = ({"event_id": x["event_id"], "name": x["result_name"], "value": x["value"], "unit": x["unit"],
                       "date": x["result_date"]} if x["event_id"] else None)
     out["reference_line"] = (repo.reference_line(x["patient_name"], x["patient_code"], x["test_label"], x["upload_date"],
@@ -358,19 +360,22 @@ def save_external_value(report_id: str, body: ExternalValueIn, patient=Depends(p
         raise HTTPException(422, f"{x['test_label']} is usually between {lo:g} and {hi:g} {x['expected_unit']}. "
                                  "Please check the value on the report.")
     unit = (body.unit or "").strip() or None
+    if x["test_type"] == "Other" and x["expected_unit"]:      # answers a test order: the ordered test's unit
+        unit = x["expected_unit"]
     if x["test_type"] == "Other" and not unit:
         raise HTTPException(422, "Please enter the unit printed on the report.")
     if body.test_date and body.test_date > today():
         raise HTTPException(422, "The test date cannot be in the future.")
     try:
         repo.save_reviewed_value(conn, patient["id"], report_id, body.value, user, unit=unit, test_date=body.test_date)
+        test_orders.on_report_verified(conn, patient["id"], report_id, user)        # the order it answers, if any
         corrected = body.test_date and body.test_date.isoformat() != x["test_date"]
         repo.audit(conn, repo.clinician_actor(user), "EXTERNAL_REPORT_REVIEWED", patient_id=patient["id"],
                    resource_type="external_report", resource_id=report_id,
                    detail=f"{x['test_label']} {body.value:g} {x['expected_unit'] or unit}"
                           + (f"; test date corrected from {x['test_date']} to {body.test_date}" if corrected else ""))
         conn.commit()
-    except repo.RepoError as e:
+    except (repo.RepoError, test_orders.OrderError) as e:
         conn.rollback()
         raise HTTPException(409, str(e))
     except sqlite3.IntegrityError as e:       # the database refused - e.g. someone else saved it a moment ago
@@ -387,10 +392,13 @@ class ExternalRejectIn(BaseModel):
 def reject_external_report(report_id: str, body: ExternalRejectIn, patient=Depends(patient_for_clinician),
                            user=Depends(current_clinician), conn=Depends(get_conn)):
     """The report can't be used (unreadable, wrong file). No value is saved."""
-    _external_or_404(conn, patient["id"], report_id)
+    x = _external_or_404(conn, patient["id"], report_id)
     reason = (body.reason or "").strip() or None
+    if x.get("test_order_item_id") and len(reason or "") < 3:
+        raise HTTPException(422, "Please give a reason - the patient will see it and upload again.")
     if not repo.reject_external_report(conn, patient["id"], report_id, user["id"], reason):
         raise HTTPException(409, "This report has already been reviewed.")
+    test_orders.on_report_rejected(conn, patient["id"], report_id, user, reason)   # back to waiting; the patient is told
     repo.audit(conn, repo.clinician_actor(user), "EXTERNAL_REPORT_REJECTED", patient_id=patient["id"],
                resource_type="external_report", resource_id=report_id, detail=reason)
     conn.commit()

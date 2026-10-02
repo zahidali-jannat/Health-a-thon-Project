@@ -1,0 +1,84 @@
+# Consultation Brief rules. Every clinical threshold the brief uses is in this file - none are hard-coded in the logic.
+# Edit and restart the backend. The brief only states facts and the rule that fired; it never advises treatment.
+
+schema_version = "1.0"
+visit_type = "Diabetes follow-up"          # shown in the identity strip (appointments carry no visit type yet)
+
+[limits]                                   # layout limits for the front card (not clinical thresholds)
+since_last_visit_max = 5
+attention_max = 3
+medicines_max = 8
+trend_points = 6
+team_note_max = 280
+
+[ranking]
+# Order for "Since last visit" and "Needs your attention": first = most important. Ties sort by recency.
+# requires clinician sign-off
+order = ["emergency_visit", "low_glucose", "above_target", "medicine_change", "worsening_value", "overdue_tests",
+         "appointment_issue", "awaiting_verification", "medicines_outdated", "improving_value", "stable"]
+
+[glucose]
+# A verified glucose value below this is "low glucose".                      requires clinician sign-off
+low_mg_dl = 70
+# Which values count as glucose for that rule (names as recorded, case-insensitive).
+names = ["Fasting glucose", "Post-meal glucose (PP)", "Random glucose", "Blood glucose", "Hypoglycaemia"]
+
+[medicines]
+# The recorded medicines list is "possibly outdated" when nothing confirmed it for this many days.
+# requires clinician sign-off
+outdated_after_days = 90
+
+[appointments]
+# "Repeated missed or cancelled appointments": this many or more within the lookback.   requires clinician sign-off
+repeated_missed_count = 2
+lookback_days = 180
+
+# Key numbers, in this fixed order. `names` = how the value is recorded; `change_size` = the smallest change that is
+# "meaningful" (smaller = "no meaningful change"); `worse` = which direction is worsening: "up", "down" or "either".
+[[key_numbers]]
+key = "hba1c"
+label = "HbA1c"
+unit = "%"
+names = ["HbA1c"]
+change_size = 0.3          # requires clinician sign-off
+worse = "up"               # requires clinician sign-off
+
+[[key_numbers]]
+key = "fasting_glucose"
+label = "Fasting glucose"
+unit = "mg/dL"
+names = ["Fasting glucose"]
+change_size = 20           # requires clinician sign-off
+worse = "up"               # requires clinician sign-off
+
+[[key_numbers]]
+key = "pp_glucose"
+label = "Post-meal glucose"
+unit = "mg/dL"
+names = ["Post-meal glucose (PP)"]
+change_size = 30           # requires clinician sign-off
+worse = "up"               # requires clinician sign-off
+
+[[key_numbers]]
+key = "egfr"
+label = "eGFR"
+unit = "mL/min/1.73m²"
+names = ["eGFR"]
+change_size = 5            # requires clinician sign-off
+worse = "down"             # requires clinician sign-off
+
+[[key_numbers]]
+key = "bp_systolic"
+label = "Blood pressure (systolic)"
+unit = "mmHg"
+names = ["Blood pressure (systolic)"]
+change_size = 10           # requires clinician sign-off
+worse = "up"               # requires clinician sign-off
+
+[[key_numbers]]
+key = "weight"
+label = "Weight"
+unit = "kg"
+names = ["Weight"]
+change_size = 2            # requires clinician sign-off
+worse = "either"           # requires clinician sign-off

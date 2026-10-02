@@ -2,8 +2,8 @@ import { CheckCircle2, Copy, History, Palette, RefreshCw, Share2, UserRound } fr
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, formatDate, formatDateTime, formatTime } from '../api.js'
-import { useClinician } from '../auth.jsx'
-import { AppShell, btn, ErrorBox, input, SETTINGS_SECTIONS, td, th } from '../components/ui.jsx'
+import { settingsBase, useClinician } from '../auth.jsx'
+import { AppShell, btn, ErrorBox, input, settingsFor, td, th } from '../components/ui.jsx'
 
 const card = 'rounded-lg border border-line bg-surface px-4 py-4'
 const field = `${input} mt-1`
@@ -18,18 +18,21 @@ const PAGES = {
   'patient-activity': () => <PatientActivitySection />,
 }
 
-// Each Settings option is its own page (/care-team/settings/<section>) showing only that section.
+// Each Settings option is its own page (/care-team/settings/<section>, or /doctor/settings/<section> for a doctor)
+// showing only that section. Each role sees only its own sections.
 // The pages are listed in the sidebar under Account → Settings.
 export default function Settings() {
   const { section } = useParams()
+  const { user } = useClinician()
   useEffect(() => {
     window.scrollTo(0, 0)
   }, [section])
-  if (!PAGES[section]) return <Navigate to="/care-team/settings/account" replace />
-  const current = SETTINGS_SECTIONS.find((s) => s.id === section)
+  const base = settingsBase(user)
+  const current = settingsFor(user).find((s) => s.id === section)
+  if (!PAGES[section] || !current) return <Navigate to={`${base}/account`} replace />
   return (
     <AppShell title={current.label} subtitle={current.text}
-      breadcrumbs={[{ label: 'Settings', to: '/care-team/settings/account' }, { label: current.label }]}>
+      breadcrumbs={[{ label: 'Settings', to: `${base}/account` }, { label: current.label }]}>
       <div className="max-w-4xl">{PAGES[section]()}</div>
     </AppShell>
   )

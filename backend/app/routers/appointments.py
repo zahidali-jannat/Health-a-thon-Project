@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .. import appointments as appt
-from ..deps import current_clinician, current_patient, get_conn, now, patient_for_clinician, today
+from ..deps import current_clinician, current_doctor, current_patient, get_conn, now, patient_for_clinician, today
 
 clinical = APIRouter(prefix="/api", tags=["appointments (care team)"])
 portal = APIRouter(prefix="/api/me", tags=["appointments (patient)"])
@@ -69,14 +69,14 @@ class BookIn(BaseModel):
 # ================================================================== care team
 
 @clinical.get("/doctor-profile")
-def my_doctor_profile(user=Depends(current_clinician), conn=Depends(get_conn)):
+def my_doctor_profile(user=Depends(current_doctor), conn=Depends(get_conn)):
     doctor = appt.doctor_for_user(conn, user["id"])
     conn.commit()
     return {"doctor": doctor}
 
 
 @clinical.put("/doctor-profile")
-def save_my_doctor_profile(body: HoursIn, user=Depends(current_clinician), conn=Depends(get_conn)):
+def save_my_doctor_profile(body: HoursIn, user=Depends(current_doctor), conn=Depends(get_conn)):
     try:
         return {"doctor": appt.save_doctor_profile(conn, user, body.working_start_time, body.working_end_time,
                                                    body.slot_duration_minutes, body.buffer_minutes, today())}

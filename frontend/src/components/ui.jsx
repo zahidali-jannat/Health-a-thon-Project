@@ -1,11 +1,11 @@
 import {
   Activity, AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Copy, FileCheck2, History, Inbox, LayoutGrid, LogOut, Menu,
-  Clock, OctagonAlert, Palette, ReceiptText, Settings, Share2, UserRound, Users, X,
+  Clock, FileText, OctagonAlert, Palette, ReceiptText, Settings, Share2, Stethoscope, UserRound, Users, X,
 } from 'lucide-react'
 import { Children, createContext, useContext, useEffect, useState } from 'react'
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
-import { useClinician } from '../auth.jsx'
+import { homeFor, roleOf, settingsBase, useClinician } from '../auth.jsx'
 
 /* ============================================================== type scale
  * Every text element maps to one tier - nothing is "same size, same weight" as everything else.
@@ -143,26 +143,35 @@ export function Notice({ children }) {
 export const SETTINGS_SECTIONS = [
   { id: 'account', label: 'Account', text: 'Name, phone, password', icon: UserRound },
   { id: 'appearance', label: 'Appearance', text: 'Light, dark or pleasant', icon: Palette },
-  { id: 'consultation-hours', label: 'Consultation hours', text: 'When patients can book you', icon: Clock },
-  { id: 'sharing', label: 'Sharing', text: 'Share a patient with a colleague', icon: Share2 },
-  { id: 'access-log', label: 'Access log', text: 'Who opened or changed records', icon: History },
-  { id: 'patient-activity', label: 'Activity by patients', text: 'What your patients sent in the last 14 days', icon: Activity },
+  { id: 'consultation-hours', label: 'Consultation hours', text: 'When patients can book you', icon: Clock, role: 'doctor' },
+  { id: 'sharing', label: 'Sharing', text: 'Share a patient with a colleague', icon: Share2, role: 'care_team' },
+  { id: 'access-log', label: 'Access log', text: 'Who opened or changed records', icon: History, role: 'care_team' },
+  { id: 'patient-activity', label: 'Activity by patients', text: 'What your patients sent in the last 14 days', icon: Activity, role: 'care_team' },
 ]
+export const settingsFor = (user) => SETTINGS_SECTIONS.filter((s) => !s.role || s.role === roleOf(user))
 
 const NAV = [
   { to: '/care-team', label: 'Overview', icon: LayoutGrid, end: true },
   { to: '/care-team/patients', label: 'Patients', icon: Users },
   { to: '/care-team/schedule', label: 'Schedule', icon: CalendarDays },
+  { to: '/care-team/briefs', label: 'Briefs', icon: FileText },
   { to: '/care-team/reports', label: 'Pending reports', icon: Inbox, count: 'pendingReports' },
   { to: '/care-team/bills', label: 'Medicine bills', icon: ReceiptText, count: 'pendingBills' },
   { to: '/care-team/consent-log', label: 'Consent log', icon: FileCheck2 },
+]
+// The doctor's own dashboard: briefs the clinic team sent, and today's queue. Nothing of the team's workspace.
+const DOCTOR_NAV = [
+  { to: '/doctor', label: 'Dashboard', icon: Stethoscope, end: true },
 ]
 
 function Sidebar({ onNavigate }) {
   const { user } = useClinician()
   const navigate = useNavigate()
   const { pathname } = useLocation()
-  const onSettings = pathname.startsWith('/care-team/settings')
+  const doctor = user.role === 'doctor'
+  const nav = doctor ? DOCTOR_NAV : NAV
+  const settings = settingsBase(user)
+  const onSettings = pathname.startsWith(settings)
   const [settingsOpen, setSettingsOpen] = useState(onSettings)
 
   const item = ({ isActive }) =>
@@ -178,27 +187,28 @@ function Sidebar({ onNavigate }) {
   const [pendingReports, setPendingReports] = useState(null)
   const [pendingBills, setPendingBills] = useState(null)
   useEffect(() => {
+    if (doctor) return
     api.pendingItems().then((r) => setPendingReports(r.length)).catch(() => {})     // everything waiting, not just lab reports
     api.pendingBills().then((r) => setPendingBills(r.length)).catch(() => {})
-  }, [])
+  }, [doctor])
   const counts = { pendingReports, pendingBills }
 
   const initials = user.full_name.replace(/^Dr\.?\s+/i, '').split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()
 
   return (
     <div className="flex h-full flex-col">
-      <Link to="/care-team" onClick={onNavigate} className="flex items-center gap-2.5 border-b border-line px-4 py-3.5">
+      <Link to={homeFor(user)} onClick={onNavigate} className="flex items-center gap-2.5 border-b border-line px-4 py-3.5">
         <img src="/favicon.svg" alt="" className="h-7 w-7" />
-        <span className="leading-tight">
-          <span className="block text-sm font-semibold text-ink">UC2 Care</span>
-          <span className="block text-[11px] text-muted">Consultation Readiness</span>
+        <span className="min-w-0 leading-tight">
+          <span className="block truncate text-sm font-semibold text-ink">{doctor ? 'Doctor dashboard' : user.clinic_name ?? 'UC2 Care'}</span>
+          <span className="block truncate text-[11px] text-muted">{doctor ? user.clinic_name : 'Clinic team · UC2 Care'}</span>
         </span>
       </Link>
 
       <nav aria-label="Main" className="flex-1 overflow-y-auto px-2.5 py-3">
-        <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">Clinical</p>
+        <p className="px-2.5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted">{doctor ? 'Doctor' : 'Clinic team'}</p>
         <ul className="space-y-0.5">
-          {NAV.map(({ to, label, icon: Icon, end, count }) => (
+          {nav.map(({ to, label, icon: Icon, end, count }) => (
             <li key={to}>
               <NavLink to={to} end={end} onClick={onNavigate} className={item}>
                 <Icon size={16} aria-hidden="true" /> {label}
@@ -221,9 +231,9 @@ function Sidebar({ onNavigate }) {
         </button>
         {settingsOpen && (
           <ul id="settings-menu" aria-label="Settings" className="mt-0.5 space-y-0.5 border-l border-line pl-2 ml-4">
-            {SETTINGS_SECTIONS.map(({ id, label }) => (
+            {settingsFor(user).map(({ id, label }) => (
               <li key={id}>
-                <NavLink to={`/care-team/settings/${id}`} onClick={onNavigate}
+                <NavLink to={`${settings}/${id}`} onClick={onNavigate}
                   className={({ isActive }) => `block rounded-md px-2.5 py-1.5 text-sm ${
                     isActive ? 'bg-brand-50 font-semibold text-brand-800' : 'text-muted hover:bg-subtle hover:text-ink'}`}>
                   {label}
@@ -241,7 +251,7 @@ function Sidebar({ onNavigate }) {
           </span>
           <span className="min-w-0 leading-tight">
             <span className="block truncate text-sm font-medium text-ink">{user.full_name}</span>
-            <span className="block text-xs text-muted tnum">{user.clinician_code}</span>
+            <span className="block text-xs text-muted tnum">{doctor ? 'Doctor' : 'Clinic team'} · {user.clinician_code}</span>
           </span>
         </div>
         <button type="button" onClick={signOut} className={`${btn.ghost} mt-2 w-full justify-start text-muted hover:text-ink`}>
@@ -266,8 +276,8 @@ export function AppShell({ title, subtitle, breadcrumbs = [], actions, meta, chi
   useEffect(() => setDrawer(false), [pathname])
 
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr]">
-      <div className="hidden border-r border-line bg-surface lg:block">
+    <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr] print:block">
+      <div className="hidden border-r border-line bg-surface lg:block print:hidden">
         <aside className="sticky top-0 h-screen">
           {sidebar()}
         </aside>
@@ -285,7 +295,7 @@ export function AppShell({ title, subtitle, breadcrumbs = [], actions, meta, chi
       )}
 
       <div className="min-w-0">
-        <div className="sticky top-0 z-20 flex h-12 items-center gap-3 border-b border-line bg-surface/95 px-4 backdrop-blur-sm lg:px-6">
+        <div className="sticky top-0 z-20 flex h-12 items-center gap-3 border-b border-line bg-surface/95 px-4 backdrop-blur-sm lg:px-6 print:hidden">
           <button type="button" onClick={() => setDrawer(true)} aria-label="Open navigation"
             className="-ml-1 rounded-md p-1.5 text-muted hover:bg-subtle lg:hidden"><Menu size={20} /></button>
           <nav aria-label="Breadcrumb" className="min-w-0 flex-1">
@@ -305,9 +315,9 @@ export function AppShell({ title, subtitle, breadcrumbs = [], actions, meta, chi
 
         <main className={`px-4 py-5 lg:px-6 ${large ? 'text-base' : ''}`}>
           {(title || actions) && (
-            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3 print:hidden">
               <div className="min-w-0">
-                <h1 className={`font-semibold tracking-tight text-ink ${large ? 'text-2xl' : 'text-xl'}`}>{title}</h1>
+                <h1 className={`font-bold tracking-tight text-ink ${large ? 'text-2xl' : 'text-xl'}`}>{title}</h1>
                 {subtitle && <div className={`mt-0.5 text-muted ${large ? 'text-base' : 'text-sm'}`}>{subtitle}</div>}
               </div>
               {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

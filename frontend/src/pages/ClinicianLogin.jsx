@@ -2,6 +2,7 @@ import { CheckCircle2, ClipboardList, Copy, History, ShieldCheck } from 'lucide-
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
+import { homeFor } from '../auth.jsx'
 import { btn, ErrorBox, input, Tabs } from '../components/ui.jsx'
 
 const inputCls = `${input} mt-1`
@@ -12,7 +13,12 @@ export default function ClinicianLogin() {
   const [created, setCreated] = useState(null)
   const navigate = useNavigate()
   const location = useLocation()
-  const next = location.state?.from || '/care-team'
+  // back to the page they came from - but only if it belongs to their own dashboard (doctor or clinic team)
+  const afterSignIn = (user) => {
+    const from = location.state?.from
+    const home = homeFor(user)
+    navigate(from && from.startsWith(home) ? from : home, { replace: true })
+  }
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
@@ -42,17 +48,17 @@ export default function ClinicianLogin() {
             <img src="/favicon.svg" alt="" className="h-7 w-7" /><span className="text-sm font-semibold text-ink">UC2 Care</span>
           </Link>
           {created ? (
-            <AccountCreated user={created} onContinue={() => navigate('/care-team', { replace: true })} />
+            <AccountCreated user={created} onContinue={() => navigate(homeFor(created), { replace: true })} />
           ) : (
             <>
-              <h1 className="text-xl font-semibold text-ink">Care team</h1>
-              <p className="mt-0.5 text-sm text-muted">{mode === 'signin' ? 'Sign in to continue.' : 'Create your clinician account.'}</p>
+              <h1 className="text-xl font-bold text-ink">Clinic sign in</h1>
+              <p className="mt-0.5 text-sm text-muted">{mode === 'signin' ? 'Doctors and the clinic team sign in here.' : 'Create a doctor or clinic team account.'}</p>
               <div className="mt-4">
                 <Tabs label="Sign in or create account" value={mode} onChange={setMode}
                   tabs={[{ id: 'signin', label: 'Sign in' }, { id: 'signup', label: 'Create account' }]} />
               </div>
               <div className="pt-5">
-                {mode === 'signin' ? <SignIn onDone={() => navigate(next, { replace: true })} /> : <SignUp onDone={setCreated} />}
+                {mode === 'signin' ? <SignIn onDone={afterSignIn} /> : <SignUp onDone={setCreated} />}
               </div>
             </>
           )}
@@ -84,7 +90,7 @@ function SignIn({ onDone }) {
   const [password, setPassword] = useState('')
   const { busy, error, run } = useSubmit()
   return (
-    <form onSubmit={(e) => { e.preventDefault(); run(async () => { await api.clinicianLogin(identifier, password); onDone() }) }}>
+    <form onSubmit={(e) => { e.preventDefault(); run(async () => onDone(await api.clinicianLogin(identifier, password))) }}>
       <label className="block text-[13px] font-medium text-ink">
         Clinician ID or phone number
         <input value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoComplete="username" required
@@ -103,15 +109,27 @@ function SignIn({ onDone }) {
 }
 
 function SignUp({ onDone }) {
-  const [f, setF] = useState({ name: '', phone: '', password: '' })
+  const [f, setF] = useState({ name: '', phone: '', password: '', role: 'doctor' })
   const { busy, error, run } = useSubmit()
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }))
   return (
-    <form onSubmit={(e) => { e.preventDefault(); run(async () => onDone(await api.clinicianSignup(f.name, f.phone, f.password))) }}>
-      <label className="block text-[13px] font-medium text-ink">
+    <form onSubmit={(e) => { e.preventDefault(); run(async () => onDone(await api.clinicianSignup(f.name, f.phone, f.password, f.role))) }}>
+      <fieldset>
+        <legend className="text-[13px] font-medium text-ink">I am</legend>
+        <div className="mt-1 grid grid-cols-2 gap-2">
+          {[['doctor', 'A doctor', 'Sees briefs on the doctor dashboard'], ['care_team', 'Clinic team', 'Patients, reports, briefs']].map(([id, label, hint]) => (
+            <label key={id} className={`cursor-pointer rounded-md border px-3 py-2 text-sm focus-within:ring-2 focus-within:ring-brand-100 ${f.role === id ? 'border-brand-600 bg-brand-50' : 'border-line-strong'}`}>
+              <input type="radio" name="role" value={id} checked={f.role === id} onChange={set('role')} className="sr-only" />
+              <span className="block font-semibold text-ink">{label}</span>
+              <span className="block text-xs text-muted">{hint}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <label className="mt-4 block text-[13px] font-medium text-ink">
         Full name
         <input value={f.name} onChange={set('name')} autoComplete="name" required maxLength={120}
-          placeholder="e.g. Dr. Asha Verma" className={inputCls} />
+          placeholder={f.role === 'doctor' ? 'e.g. Dr. Asha Verma' : 'e.g. Neha Sharma'} className={inputCls} />
       </label>
       <label className="mt-4 block text-[13px] font-medium text-ink">
         Phone number
@@ -145,9 +163,11 @@ function AccountCreated({ user, onContinue }) {
         <Copy size={16} aria-hidden="true" /> {copied ? 'Copied' : 'Copy ID'}
       </button>
       <p className="mx-auto mt-4 max-w-sm text-sm text-muted">
-        Use it to sign in. Colleagues use it to share a patient with you — you’ll only see patients shared with you or added by you.
+        {user.role === 'doctor'
+          ? 'Use it to sign in. Patients and the clinic team use it to add you to a patient’s care team.'
+          : `Use it to sign in. You see every patient of ${user.clinic_name}.`}
       </p>
-      <button type="button" onClick={onContinue} className={`${primary} mt-6`}>Continue to my patients</button>
+      <button type="button" onClick={onContinue} className={`${primary} mt-6`}>{user.role === 'doctor' ? 'Continue to my dashboard' : 'Continue'}</button>
     </div>
   )
 }

@@ -16,6 +16,9 @@ class Settings:
     patient_session_hours: int = 24 * 7
     login_code_minutes: int = 10
     max_upload_bytes: int = 10 * 1024 * 1024
+    demo_mode: bool = False        # Test Orders "Demo simulator" (a fake clinic-lab result); never on in production
+    lab_service_token: str | None = None   # the clinic lab system's credential for POST /internal/lab-results
+    reminders: bool = True         # the hourly test-order reminder job
 
     @property
     def is_dev(self) -> bool:
@@ -23,8 +26,13 @@ class Settings:
 
 
 def get_settings() -> Settings:
+    app_env = os.environ.get("APP_ENV", "dev")
     return Settings(
-        app_env=os.environ.get("APP_ENV", "dev"),
+        app_env=app_env,
         db_path=Path(os.environ.get("UC2_DB_PATH", BACKEND_DIR / "uc2.db")),
         storage_dir=Path(os.environ.get("UC2_STORAGE_DIR", BACKEND_DIR / "storage")),
+        # demo mode follows the dev environment unless set explicitly; it can never be on outside dev
+        demo_mode=app_env == "dev" and os.environ.get("DEMO_MODE", "1") == "1",
+        lab_service_token=os.environ.get("LAB_SERVICE_TOKEN") or None,
+        reminders=os.environ.get("UC2_REMINDERS", "on") == "on",
     )

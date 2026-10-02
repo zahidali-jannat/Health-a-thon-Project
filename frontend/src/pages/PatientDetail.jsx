@@ -1,5 +1,5 @@
 import {
-  AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, ClipboardPen, Clock, Database, FileImage, FlaskConical, FolderOpen, IdCard, PenLine, Pencil, Globe, History, KeyRound, OctagonAlert, ReceiptText, Smartphone, XCircle,
+  AlertTriangle, Building2, CheckCircle2, ChevronDown, ChevronRight, ClipboardList, ClipboardPen, Clock, Database, FileImage, FlaskConical, FolderOpen, IdCard, PenLine, Pencil, Globe, History, KeyRound, ListChecks, OctagonAlert, ReceiptText, Smartphone, XCircle,
 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -12,12 +12,13 @@ import DocumentPreview from '../components/DocumentPreview.jsx'
 import EnterResults from '../components/EnterResults.jsx'
 import ReportLink, { PaperclipButton } from '../components/ReportLink.jsx'
 import ReportPicker from '../components/ReportPicker.jsx'
+import TestOrdersSection from '../components/TestOrders.jsx'
 import { UploadedReportsProvider } from '../components/UploadedReports.jsx'
 import {
   AppShell, Badge, btn, ErrorBox, Field, input, LEVELS, Notice, Panel, PatientCredentials, SignalFacts, td, th, TYPE, PanelTier,
 } from '../components/ui.jsx'
 
-const TABS = ['summary', 'labs', 'reports', 'sources', 'record', 'values', 'bills']
+const TABS = ['summary', 'labs', 'reports', 'sources', 'record', 'values', 'bills', 'tests']
 
 export default function PatientDetail() {
   const { id } = useParams()
@@ -63,7 +64,6 @@ export default function PatientDetail() {
           if (tab === 'summary') setPriorityOpen((o) => !o)
           else { setTab('summary'); setPriorityOpen(true) }   // from another tab: go to Summary and show it
         }} /></span>}
-      subtitle={<ClinicalChips patient={patient} />}
       actions={<PatientDetailsButton patient={patient} />}>
 
       {error && <div className="mb-3"><ErrorBox>{error}</ErrorBox></div>}
@@ -88,6 +88,7 @@ export default function PatientDetail() {
           )}
           {tab === 'values' && <ManualValuesPanel patientId={patient.id} refresh={patient} />}
           {tab === 'bills' && <MedicalBills patient={patient} onChanged={reload} />}
+          {tab === 'tests' && <TestOrdersSection patient={patient} />}
         </div>
         </PanelTier.Provider>
       </div>
@@ -107,15 +108,16 @@ function SectionCards({ value, onChange }) {
     { id: 'record', title: 'Record Manually', icon: PenLine },
     { id: 'values', title: 'Entered Values', icon: ClipboardPen },
     { id: 'bills', title: 'Medical Bills', icon: ReceiptText },
+    { id: 'tests', title: 'Tests to Do', icon: ListChecks },
   ]
   return (
-    <div role="tablist" aria-label="Patient record" className="grid grid-cols-2 gap-3 md:grid-cols-4 min-[1360px]:flex">
+    <div role="tablist" aria-label="Patient record" className="grid grid-cols-2 gap-3 md:grid-cols-4 min-[1560px]:flex">
       {cards.map(({ id, title, icon: Icon }) => {
         const active = id === value
         return (
           <button key={id} id={`section-${id}`} type="button" role="tab" aria-selected={active} aria-controls="record-section"
             onClick={() => onChange(id)}
-            className={`flex min-h-16 items-center justify-center rounded-lg border px-2 py-3 text-center min-[1360px]:min-w-max min-[1360px]:flex-1 min-[1360px]:basis-0 ${active
+            className={`flex min-h-16 items-center justify-center rounded-lg border px-2 py-3 text-center min-[1560px]:min-w-max min-[1560px]:flex-1 min-[1560px]:basis-0 ${active
               ? 'border-brand-600 bg-brand-50 ring-1 ring-brand-600' : 'border-line bg-surface hover:border-line-strong hover:bg-subtle'}`}>
             <span className={`flex items-center gap-2 whitespace-nowrap ${TYPE.section} ${active ? 'text-brand-800!' : ''}`}>
               <Icon size={16} aria-hidden="true" className={`shrink-0 ${active ? 'text-brand-700' : 'text-muted'}`} /> {title}
@@ -349,19 +351,6 @@ function AccessDialog({ patient: p, onClose }) {
 }
 
 // Latest HbA1c stays on the main screen (it feeds the risk detector) as a small chip under the patient's name.
-function ClinicalChips({ patient: p }) {
-  const chip = `inline-flex items-baseline gap-1.5 rounded-md border border-line bg-surface px-2 py-0.5 ${TYPE.meta}`
-  return (
-    <span className="mt-1 flex flex-wrap gap-2">
-      <span className={chip}>
-        Latest HbA1c
-        <span className={`${TYPE.body} tnum`}>{p.latest_hba1c ? `${p.latest_hba1c.value.toFixed(1)}%` : '—'}</span>
-        {p.latest_hba1c && <span className="tnum">· {formatDate(p.latest_hba1c.date)}</span>}
-      </span>
-    </span>
-  )
-}
-
 // ------------------------------------------------------------------ Summary: flag reasoning
 
 // Appointments the patient booked (confirmed at once - nothing to accept here), or ones waiting for a new time.

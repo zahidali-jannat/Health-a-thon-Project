@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 TODAY = date(2026, 9, 25)
 PRIYA = "CLN-PRYA27"      # care team for all three demo patients
 KARAN = "CLN-KRNB58"      # real account, no patients
+TEAM = "CLN-TNSQ01"       # Tanishq Clinic Management: the clinic team (sees every patient, prepares and sends briefs)
 PASSWORD = "demo1234"
 
 
@@ -17,6 +18,7 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("UC2_DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("UC2_STORAGE_DIR", str(tmp_path / "storage"))
     monkeypatch.setenv("DEMO_TODAY", TODAY.isoformat())
+    monkeypatch.setenv("UC2_REMINDERS", "off")      # tests run reminders explicitly, never on a timer
     from app import ratelimit
     ratelimit.reset_all()         # the lockout is in-memory; don't let one test lock out the next
     yield

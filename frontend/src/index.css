@@ -147,3 +147,16 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .fade-in { animation: none; }
 }
+
+/* Printing a consultation brief: one A4 page, the brief only */
+@media print {
+  @page { size: A4; margin: 10mm; }
+  body { background: #fff; }
+  main { padding: 0 !important; }
+  .consultation-brief { font-size: 11px; line-height: 1.35; }
+  .consultation-brief * { font-size: inherit !important; }
+  .consultation-brief h2 { font-size: 16px !important; }
+  .consultation-brief h3 span:first-child { font-size: 13px !important; }
+  .consultation-brief section { padding-top: 4px !important; padding-bottom: 4px !important; }
+  .consultation-brief td, .consultation-brief li { padding-top: 1px !important; padding-bottom: 1px !important; }
+}

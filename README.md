@@ -353,6 +353,193 @@ A booked slot shows the patient's name only to clinicians on that patient's care
 patient"* and cannot send that patient's message. Changing your hours rebuilds only future days nobody has booked or
 blocked. Days with bookings keep their slots.
 
+## Test Orders: tests to do before the next appointment
+
+After a consultation, the care team opens the patient and uses **Tests to Do → Add tests**.
+
+**Ordering**
+- Each test gets a due date, priority, route (clinic lab, outside lab or either) and patient instructions. The
+  instructions are pre-filled from the catalog, for example the fasting rules.
+- **Default due date:** the next appointment minus `due_buffer_days` (3).
+- **Due-date rules:**
+  - A date **after** the appointment is refused.
+  - A date inside the buffer is allowed, with a warning.
+  - With no appointment booked, a date must be chosen.
+  - Ordering a test that is already open shows a warning.
+- **Review** shows a confirmation summary of the tests, their due dates and the appointment date. Saving is one
+  transaction with an idempotency key, so a double click saves the order once.
+
+**The patient**
+- **My tests** shows a card per test. If the clinic lab may do it, the card says *"Get this done at our clinic by …
+  Your results will appear automatically."*
+- **I did this test elsewhere** uploads the report from the test's own card: test, test date, lab and file (PDF,
+  JPG or PNG, checked by its real content, 10 MB max), with upload progress. It then says *"Sent for clinician
+  review"*.
+
+**Results**
+- **Uploads:** an upload is verified with the existing report review screen, now showing *Answers order* and the
+  lab. Saving the value verifies the order item. Rejecting needs a reason. The item goes back to waiting, the patient
+  is told why, and a **Re-upload** button appears.
+- **Clinic lab results** arrive at `POST /api/internal/lab-results`:
+  - It needs an `X-Service-Token` matching the `LAB_SERVICE_TOKEN` environment variable. With no token set, the
+    endpoint answers 503.
+  - It is idempotent per (`lab_order_ref`, `test_code`).
+  - A plausible matched result is verified automatically. An implausible value or a different unit goes to
+    clinician review. A result with no matching order goes to *Clinic lab results with no order*.
+- **Only clinician-verified values count as results.** Pending and rejected uploads are shown as reports, never as
+  values, never on graphs, and never in FHIR as Observations.
+
+**Status and audit**
+- **Statuses:** ordered → (sample collected) → result received | uploaded by patient → verified → closed. Other
+  states are rejected, cancelled and not done; each needs a reason.
+- **Enforced twice:** the code and a database trigger (`test_order_transitions`) both enforce the status changes.
+- **Every change is audited:** who, when, old and new values, and why.
+- **Edits** need the item's current `version` (optimistic locking).
+- **Overdue** and **"appointment changed"** flags are worked out on every read. Moving or cancelling an appointment,
+  including through *Mark doctor unavailable*, flags open tests. It never changes their dates.
+
+**Reminders, dashboard and header**
+- **Reminders:** an hourly job sends in-app reminders 7, 3 and 1 day(s) before the due date, and once when a test
+  becomes overdue. SMS and WhatsApp are log-only stubs that record the notification id only, never its text.
+  Each (item, kind) and each (item, day) is sent at most once.
+- **Overview:** the *Tests overdue before appointment* table can be filtered by doctor and by days to the
+  appointment.
+- **Patient header:** shows pending test counts.
+
+**FHIR view** (*Tests to Do → FHIR view*): FHIR R4-shaped resources generated on request from the record.
+Nothing is stored.
+- Mapping: ServiceRequest per order, Observation per verified result, DocumentReference per linked report.
+- Each resource has a readable summary and a raw JSON toggle, plus *Download bundle*. Each view is audited.
+- Endpoints: `GET /api/patients/{id}/fhir/ServiceRequest|Observation|DocumentReference|Bundle`.
+- Tests validate the output with `fhir.resources` (its R4B models, the R4 technical correction). It is FHIR R4
+  shaped data only, with no ABDM or national compliance claimed.
+
+**Demo simulator:** in the dev environment, each order that the clinic lab may do has a **Demo simulator** button.
+It sends a made-up clinic-lab result through the same ingestion path as the real lab system. Turn it off with
+`DEMO_MODE=0`; it is never available outside `APP_ENV=dev`. To call the real endpoint, start the backend with
+`LAB_SERVICE_TOKEN=<secret>` and post:
+`{"lab_order_ref": "...", "test_code": "HBA1C", "patient_code": "P-1001", "value": 7.4, "test_date": "2026-10-02"}`.
+
+**Configuration:** `backend/config/test_orders.json` holds:
+- the catalog, synced into the database at start-up by code (with LOINC codes, units, plausible ranges and
+  instructions);
+- `due_buffer_days`, `reminder_days_before`, `max_upload_mb` and `clinic_lab_name`.
+
+Environment variables: `DEMO_MODE`, `LAB_SERVICE_TOKEN`, and `UC2_REMINDERS` (`off` disables the hourly job).
+
+## Consultation Brief
+
+**Who does what**
+- **Clinical team:** **Briefs** lists the day's appointments with a readiness checklist (vitals today, items awaiting
+  verification, how old the medicines list is, brief status). *Prepare brief* drafts the brief from verified data. The
+  composer shows the brief exactly as the doctor will see it, with:
+  - hide / pin for each line;
+  - a team note (280 characters);
+  - completeness warnings;
+  - **Send**, whose confirmation shows the patient, ID, doctor and time with AM/PM.
+
+  *Send all ready* sends every prepared draft for today after a review list.
+- **Doctor:** **Doctor queue** shows today's patients whose brief was sent to them: name, age, ID, time, priority,
+  status, nothing clinical.
+  - *Call* asks for two identifiers (patient ID plus date of birth, or age). Only then does the brief appear, and
+    calling the next patient clears it.
+  - New verified data after the cut-off shows an **Updated since sent** banner, with a toggle to see the latest data.
+    The sent version stays as sent.
+  - **Print** gives one A4 page.
+
+**Rules**
+- **Deterministic:** templates and the rules in `backend/config/brief_rules.toml` (every threshold marked *requires
+  clinician sign-off*). There is no generated text, no diagnosis and no dose advice. Medicines are "as recorded".
+- **Verified data only:** values come from hospital records, ABHA records, care-team entries and reviewed uploads.
+  Anything unreviewed appears only as "N items awaiting verification".
+- **Versions are snapshots:** a sent version is immutable (database trigger). Re-sending creates the next version
+  and marks the old one *superseded*. Drafting is idempotent (one draft per appointment), and sending a sent brief
+  again returns it unchanged.
+- **Comparison point:** "since last visit" compares against the snapshot saved when the doctor finished the last
+  consultation, otherwise the last attended clinic visit.
+- **Audit:** every draft, edit, send, call, identity check (passed or failed), open, acknowledgement and completion.
+
+**Content schema 1.0** (`consultation_briefs.content_json`). It is a stable contract; the component
+`frontend/src/components/ConsultationBrief.jsx` renders it.
+
+```
+identity          name, age, sex, patient_code, appointment {date, time, doctor}, visit_type,
+                  priority {level, label, reason, rule}
+since_last_visit  since, basis (snapshot | last_visit | none), items[≤5] {key, rule, rule_text, text, direction,
+                  date, link, pinned}, more[], stable_line
+key_numbers       rows (HbA1c, fasting glucose, post-meal glucose, eGFR, BP systolic, weight - only rows with data)
+                  {latest, previous, change {value, direction}, trend[≤6], mixed_labs, labs}, not_on_file[], notice
+medicines         items[≤8] {name, dose, status, source, date, changed}, more[], last_confirmed_on, possibly_outdated
+tests             {name, due_by, state (done | awaiting verification | overdue | not done | open), result}
+attention         items[≤3] {severity (Attention | Info), label, rule, rule_text, link}, more[]
+team_note         {text, by, at}
+footer            data_cutoff_at (UTC), verified_only, awaiting_verification, link
+```
+
+**API**
+
+| Who | Endpoint |
+|---|---|
+| Clinical team | `GET /api/clinic/briefs/today?day=` |
+| Clinical team | `POST /api/appointments/{id}/brief/draft` |
+| Clinical team | `GET /api/briefs/{id}` |
+| Clinical team | `PATCH /api/briefs/{id}` (hide / unhide / pin / unpin / note, with `row_version`) |
+| Clinical team | `POST /api/briefs/{id}/send` (`allow_not_today`) |
+| Clinical team | `POST /api/clinic/briefs/send-ready` (preview without ids) |
+| Doctor | `GET /api/doctor/queue` (ETag) |
+| Doctor | `POST /api/doctor/briefs/{id}/call` |
+| Doctor | `POST /api/doctor/briefs/{id}/confirm-identity` |
+| Doctor | `GET /api/doctor/briefs/{id}` |
+| Doctor | `POST /api/doctor/briefs/{id}/acknowledge` |
+| Doctor | `POST /api/doctor/briefs/{id}/complete` |
+| Doctor | `GET /api/doctor/briefs/{id}/updates` (ETag) |
+
+Screens poll every 20 seconds.
+
+**The future doctor dashboard** reads the same endpoints and renders `content_json` with the same
+`ConsultationBrief` component. Bump `schema_version` for any breaking change.
+
+**Stubs:**
+- per-patient targets (`brief.patient_targets`): the "above target" rule never fires until targets exist;
+- contradiction cards (`brief.conflict_cards`);
+- dose and schedule: medicines show "Dose and schedule not recorded" because the app stores none.
+
+**Demo:** `python -m app.seed` books today's appointments with Dr. Priya Nair for Ramesh (worsening), Lakshmi
+(stable) and Arjun Mehta, P-1004, a new patient with only today's weight. Sign in as the clinic team
+(`CLN-TNSQ01`) to prepare and send the briefs, then as Dr. Priya (`CLN-PRYA27`) to see them; the password for
+both is `demo1234`.
+
+---
+
+## Doctors and the clinic team: two dashboards
+
+Every clinic account is either a **doctor** or the **clinic team**. The clinic's name is stored in
+`clinic_profile` and is "Tanishq Clinic Management".
+
+| | Clinic team (`/care-team`) | Doctor (`/doctor`) |
+|---|---|---|
+| Sees | every patient of the clinic | only the briefs sent to them |
+| Menu | Overview, Patients, Schedule, Briefs, Pending reports, Medicine bills, Consent log | Dashboard |
+| Briefs | prepares and sends them | "Tanishq Clinic Management sent a report about <patient>" → Open → confirm identity → brief |
+| Settings | Account, Appearance, Sharing, Access log, Activity | Account, Appearance, Consultation hours |
+| Takes appointments | no | yes (default hours on first use) |
+
+- **Who is which:** people choose "A doctor" or "Clinic team" when they create an account.
+- **Upgrading:** migration 0015 makes every existing account a doctor, because until then every account took
+  appointments.
+- **Clinic team login:** create one on an existing database with `python -m app.accounts add-team`. This makes a
+  shared sign-in named after the clinic (no phone needed) and prints its Clinician ID and password once; change the
+  password in Settings → Account.
+- **Enforced by the server:**
+  - Brief preparation and sending (`/api/clinic/briefs/*`, `/api/briefs/*`, `/api/appointments/{id}/brief/draft`)
+    answer 403 to a doctor.
+  - The doctor endpoints (`/api/doctor/*`, `/api/doctor-profile`) answer 403 to the clinic team.
+  - `GET /api/doctor/inbox` returns the doctor's messages from the last 7 days, each with `sent_by.team`, `new`
+    and `is_today`.
+- **Clinic team access:** the team sees a patient while at least one active care-team assignment exists
+  (`repo.visible_sql`).
+- **Booking:** a patient the team registered can book any of the clinic's doctors.
+
 ---
 
 ## How the data is stored
@@ -446,12 +633,15 @@ backend/app/deps.py        sign-in and care-team access checks
 backend/app/routers/       auth.py · clinical.py (care team) · portal.py (patient) · appointments.py (booking, both sides)
 backend/app/appointments.py  slots, race-safe booking, doctor unavailable, rebooking messages
 backend/app/report_links.py  every uploaded report, label corrections, value edits and links, signed file links
+backend/app/orders.py      Test Orders: status machine, due dates, uploads, clinic-lab ingestion, reminders · fhir.py
+backend/config/            test_orders.json (test catalog, Test Orders settings) · brief_rules.toml (Consultation Brief rules)
+backend/app/brief.py       Consultation Brief: deterministic builder, versions, send, doctor queue, identity gate
 backend/app/storage.py     file storage (local disk; replaceable with S3 without touching the rest)
 backend/app/detection.py   the 7 checks + the combine rule      backend/app/config.py  all thresholds
 backend/app/labs.py        lab results vs. their own reference ranges
 backend/app/abdm_mock.py   pretend ABDM gateway
 backend/app/seed.py        optional demo data (never loaded automatically) · reset.py: wipe to empty
-backend/tests/             277 tests, incl. test_security.py (isolation, authorization, file access), test_patient_accounts.py
+backend/tests/             312 tests, incl. test_security.py (isolation, authorization, file access), test_patient_accounts.py
                            test_external_report_link.py (the mandatory document link), test_appointments.py (booking races)
 frontend/src/pages/        ClinicianLogin, Overview, Patients, PatientDetail, PendingReports, ReportReview, ConsentLog,
                            Schedule, Settings (care team) · Portal (patient)

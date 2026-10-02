@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { btn } from './ui.jsx'
 
 // One button showing the current filter and its count; the choices open under it and apply on click.
-// options: [{ id, label }]; counts: { [id]: number }; name: what is filtered, e.g. "patients".
+// options: [{ id, label }]; counts (optional): { [id]: number }; name: what is filtered, e.g. "patients".
 export default function FilterMenu({ name, options, value, counts, onChange }) {
   const [open, setOpen] = useState(false)
   const [alignRight, setAlignRight] = useState(false)     // opens leftwards when there's no room to the right
@@ -23,7 +23,7 @@ export default function FilterMenu({ name, options, value, counts, onChange }) {
         onClick={() => { setAlignRight(box.current.getBoundingClientRect().left + 208 > window.innerWidth - 8); setOpen((o) => !o) }}
         aria-label={`Filter ${name}: ${current.label}`} className={`${btn.secondary} gap-2`}>
         <ListFilter size={15} aria-hidden="true" className="text-muted" />
-        {current.label} <span className="tnum text-muted">{counts[current.id]}</span>
+        {current.label} {counts?.[current.id] != null && <span className="tnum text-muted">{counts[current.id]}</span>}
         <ChevronDown size={15} aria-hidden="true" className={`text-muted ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
@@ -35,7 +35,7 @@ export default function FilterMenu({ name, options, value, counts, onChange }) {
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-subtle ${o.id === value ? 'font-semibold text-brand-800' : 'text-ink'}`}>
                 <Check size={14} aria-hidden="true" className={o.id === value ? '' : 'invisible'} />
                 <span className="flex-1">{o.label}</span>
-                <span className="tnum text-muted">{counts[o.id]}</span>
+                {counts?.[o.id] != null && <span className="tnum text-muted">{counts[o.id]}</span>}
               </button>
             </li>
           ))}
