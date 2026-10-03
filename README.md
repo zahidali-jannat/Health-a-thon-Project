@@ -648,6 +648,34 @@ frontend/src/pages/        ClinicianLogin, Overview, Patients, PatientDetail, Pe
 frontend/src/components/   ui.jsx (design system: AppShell, sidebar, buttons, tables, forms), Modal, AddPatient, LabResults
 ```
 
+## Hosting it publicly (demo)
+
+The API also serves the built website, so the whole app runs as one service at one address.
+
+- **One click on Render:** `render.yaml` + `Dockerfile`. Render → *New* → *Blueprint* → this repository. After the
+  first deploy, set `SITE_URL` to the public address (no trailing slash) and redeploy.
+- **Demo data only:** `UC2_SEED_DEMO=1` loads the made-up demo patients into an EMPTY database (never into one that
+  has patients). `VITE_PUBLIC_DEMO=1` shows the demo logins on the front page. Never upload `backend/uc2.db`: it holds
+  real people's records. `.gitignore` and `.dockerignore` keep every `*.db` file out.
+- **Production mode:** `APP_ENV=prod` sets secure cookies and never shows one-time codes on screen. Patients sign in
+  with a password; sign-up by SMS code needs a real SMS provider (the hook is in `routers/auth.py`).
+
+**Search engines:**
+- **Indexed:** only the front page `/`, which explains the product in plain words. `index.html` carries the title,
+  description, canonical link, Open Graph and Twitter preview (`public/og-image.png`) and schema.org
+  `WebSite` + `SoftwareApplication` data.
+- **Served by the API:**
+  - `/robots.txt` allows `/` and disallows `/api`, `/care-team`, `/doctor` and `/patient`.
+  - `/sitemap.xml` is built from `SITE_URL`.
+  - Every signed-in page and the API answer with `X-Robots-Tag: noindex, nofollow`.
+- **After going live:**
+  1. Add the address to Google Search Console and Bing Webmaster Tools.
+  2. Submit `/sitemap.xml`.
+  3. Request indexing of `/`.
+  4. Link to the site from the GitHub repository and the Healthathon submission.
+
+---
+
 ## Limits of this prototype
 
 - Patient sign-in codes are shown on screen in demo mode. A real deployment would send them by SMS (the hook is in `routers/auth.py`) and run with `APP_ENV=prod`.

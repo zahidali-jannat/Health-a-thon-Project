@@ -19,6 +19,9 @@ class Settings:
     demo_mode: bool = False        # Test Orders "Demo simulator" (a fake clinic-lab result); never on in production
     lab_service_token: str | None = None   # the clinic lab system's credential for POST /internal/lab-results
     reminders: bool = True         # the hourly test-order reminder job
+    site_url: str = ""             # public address, e.g. https://uc2.example.org - canonical links and the sitemap
+    seed_demo: bool = False        # a public demo: load the demo fixtures when the database has no patients yet
+    frontend_dist: Path | None = None   # the built website (frontend/dist), served by the API when it exists
 
     @property
     def is_dev(self) -> bool:
@@ -35,4 +38,7 @@ def get_settings() -> Settings:
         demo_mode=app_env == "dev" and os.environ.get("DEMO_MODE", "1") == "1",
         lab_service_token=os.environ.get("LAB_SERVICE_TOKEN") or None,
         reminders=os.environ.get("UC2_REMINDERS", "on") == "on",
+        site_url=os.environ.get("SITE_URL", "").rstrip("/"),
+        seed_demo=os.environ.get("UC2_SEED_DEMO") == "1",
+        frontend_dist=Path(os.environ.get("FRONTEND_DIST", BACKEND_DIR.parent / "frontend" / "dist")),
     )

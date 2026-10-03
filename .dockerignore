@@ -1,0 +1,14 @@
+# never send real data, secrets or local tooling into an image
+**/*.db
+**/*.db-*
+backend/storage
+backend/uploads
+backend/.venv
+backend/tests
+**/__pycache__
+**/.pytest_cache
+frontend/node_modules
+frontend/dist
+presentation
+.git
+.DS_Store

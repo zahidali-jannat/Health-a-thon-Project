@@ -8,3 +8,8 @@ frontend/dist/
 .DS_Store
 backend/storage/
 backend/uc2.db-*
+
+# database backups made before migrations - real patient data, never commit
+backend/uc2.before-*.db
+backend/*.db
+backend/*.db-*

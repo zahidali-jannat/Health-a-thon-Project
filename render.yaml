@@ -1,0 +1,23 @@
+# Render Blueprint: a public DEMO of UC2 Consultation Readiness (made-up patients only).
+# Render -> New -> Blueprint -> pick this repository. After the first deploy, set SITE_URL to the address
+# Render gives (e.g. https://uc2-consultation-readiness.onrender.com) or your own domain, and redeploy.
+# The free plan has no persistent disk: the demo data is re-created on every deploy and restart.
+services:
+  - type: web
+    name: uc2-consultation-readiness
+    runtime: docker
+    plan: free
+    healthCheckPath: /robots.txt
+    envVars:
+      - key: APP_ENV
+        value: prod
+      - key: UC2_SEED_DEMO
+        value: "1"
+      - key: VITE_PUBLIC_DEMO        # shows the demo logins on the front page (build-time)
+        value: "1"
+      - key: UC2_DB_PATH
+        value: /tmp/uc2.db
+      - key: UC2_STORAGE_DIR
+        value: /tmp/storage
+      - key: SITE_URL
+        sync: false
