@@ -1,5 +1,12 @@
 # UC2 Consultation Readiness — Feature 1: Silent Risk Detector
  Link of the MVP:    https://uc2-consultation-readiness.onrender.com/
+
+
+
+
+
+
+ 
 Doctors usually see a diabetes patient only every 3–6 months. In between, a patient can quietly
 get worse: they miss medicine refills, log their sugar less often, their HbA1c stops improving,
 or they have a dangerous low-sugar episode. Often nobody notices until the next visit.
