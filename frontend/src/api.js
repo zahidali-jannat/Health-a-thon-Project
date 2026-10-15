@@ -97,6 +97,9 @@ export const api = {
   refill: (taken, refillDate) => postJson('/me/refill', { taken, refill_date: refillDate || null }),
   sugar: (value, photo) => postForm('/me/sugar', { value, photo }),
   upload: (kind, file, description) => postForm('/me/documents', { kind, description, file }),
+  reportTests: () => request('/report-tests'),
+  // Send report: prescription or a lab report of a chosen test; several pages arrive as one file
+  sendReport: ({ kind, test, testName, files }, onProgress) => sendFiles('/me/reports', { kind, test, test_name: testName }, files, onProgress),
   myDocuments: () => request('/me/documents'),
   myDocumentUrl: (docId) => `/api/me/documents/${docId}/file`,
   giveAge: (age) => postJson('/me/age', { age }),
@@ -199,11 +202,17 @@ export const api = {
     postJson(`/patients/${patientId}/external-reports/${reportId}/reject`, { reason: reason || null }),
 }
 
+// Several files under one field name, with progress.
+function sendFiles(path, fields, files, onProgress) {
+  return uploadWithProgress(path, fields, onProgress, {}, files)
+}
+
 // A multipart POST that reports upload progress (fetch can't), with the same error shape as `request`.
-function uploadWithProgress(path, fields, onProgress, headers = {}) {
+function uploadWithProgress(path, fields, onProgress, headers = {}, files = []) {
   return new Promise((resolve, reject) => {
     const form = new FormData()
     Object.entries(fields).forEach(([k, v]) => v != null && v !== '' && form.append(k, v))
+    files.forEach((f) => form.append('files', f))
     const xhr = new XMLHttpRequest()
     xhr.open('POST', `/api${path}`)
     xhr.withCredentials = true

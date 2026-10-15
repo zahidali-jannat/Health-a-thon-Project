@@ -1,5 +1,6 @@
 import { Check, FileText, Keyboard, RefreshCw, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import TestName from '../components/TestName.jsx'
 import { Link, useLocation } from 'react-router-dom'
 import { api, formatDate, formatDateTime } from '../api.js'
 import DocumentPreview from '../components/DocumentPreview.jsx'
@@ -111,7 +112,7 @@ export default function PendingReports() {
                           <span className="block text-xs text-muted tnum">{i.patient_code}</span>
                         </td>
                         <td className={td}>
-                          <span className="font-medium">{i.label}</span>
+                          <span className="font-medium"><ItemLabel item={i} /></span>
                           {i.detail && <span className="block text-xs text-muted">{i.detail}</span>}
                         </td>
                         <td className={`${td} whitespace-nowrap text-muted tnum`}>{received(i)}</td>
@@ -127,7 +128,7 @@ export default function PendingReports() {
                     <div className="flex items-start gap-3">
                       <Thumb item={i} />
                       <span className="min-w-0 flex-1">
-                        <span className="block font-medium text-ink">{i.label}</span>
+                        <span className="block font-medium text-ink"><ItemLabel item={i} /></span>
                         <span className="block text-sm text-ink">{i.patient_name} <span className="text-muted tnum">· {i.patient_code}</span></span>
                         {i.detail && <span className="block text-xs text-muted">{i.detail}</span>}
                         <span className="block text-xs text-muted tnum">{received(i)}</span>
@@ -193,4 +194,11 @@ function Actions({ item: i, onDecide, onView }) {
       </button>
     </span>
   )
+}
+
+// What was sent, by its short test name: "HbA1c report", "Lipid report", "Prescription".
+function ItemLabel({ item: i }) {
+  if (!i.test) return i.label
+  if (i.test === 'Prescription') return 'Prescription'
+  return <><TestName name={i.test} /> report</>
 }

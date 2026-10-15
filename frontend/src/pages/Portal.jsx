@@ -1,10 +1,11 @@
 import {
-  AlertTriangle, ArrowLeft, CalendarDays, Camera, ClipboardList, CheckCircle2, ChevronRight, Droplet, FileText, FlaskConical, FolderOpen, House, KeyRound, LogIn, LogOut,
-  Pill, ShieldCheck, Stethoscope, Upload, UserPlus,
+  AlertTriangle, ArrowLeft, CalendarDays, Camera, Check, ClipboardList, CheckCircle2, ChevronDown, ChevronRight, Droplet, FileText, FlaskConical, FolderOpen, House, KeyRound, LogIn, LogOut,
+  Menu, Pill, Plus, ShieldCheck, Stethoscope, Upload, UserPlus, X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, formatDate, formatTime, todayIso } from '../api.js'
+import TestName, { Tip, useReportTests } from '../components/TestName.jsx'
 import { AppShell, Badge, btn, input, Panel, td, th } from '../components/ui.jsx'
 
 /*
@@ -66,6 +67,7 @@ export default function Portal() {
       <PatientSidebar patient={patient} screen={screen} onSignOut={signOut}
         go={(s) => { setScreen(s); close?.() }} />
     ),
+    bottomBar: (openMore) => <PatientTabs screen={screen} go={setScreen} openMore={openMore} />,
   }
   const crumbs = (...rest) => [{ label: 'Home', onClick: home }, ...rest]
   const props = { shell, crumbs, patient, go: setScreen, onBack: home, onDone: finish }
@@ -73,8 +75,9 @@ export default function Portal() {
   switch (screen) {
     case 'refill': return <RefillScreen {...props} />
     case 'sugar': return <SugarScreen {...props} />
-    case 'photo': return <PhotoScreen {...props} />
-    case 'external': return <ExternalReportScreen {...props} />
+    case 'send':
+    case 'photo':                 // older links: both now open the one Send report screen
+    case 'external': return <SendReportScreen {...props} />
     case 'documents': return <DocumentsScreen {...props} />
     case 'doctors': return <DoctorsScreen {...props} />
     case 'appointments': return <AppointmentsScreen {...props} />
@@ -90,15 +93,42 @@ export default function Portal() {
 
 const NAV = [
   { key: 'home', label: 'Home', icon: House },
-  { key: 'tests', label: 'My tests', icon: ClipboardList },
+  { key: 'send', label: 'Send report', icon: Upload },
+  { key: 'documents', label: 'My reports', icon: FolderOpen },
   { key: 'appointments', label: 'Appointments', icon: CalendarDays },
+  { key: 'tests', label: 'My tests', icon: ClipboardList },
   { key: 'sugar', label: 'Sugar reading', icon: Droplet },
-  { key: 'refill', label: 'Medicine refill', icon: Pill },
-  { key: 'external', label: 'Send a test report', icon: FlaskConical },
-  { key: 'photo', label: 'Send a document', icon: Upload },
-  { key: 'documents', label: 'My documents', icon: FolderOpen },
+  { key: 'refill', label: 'Medicine bill', icon: Pill },
   { key: 'doctors', label: 'My doctors', icon: Stethoscope },
 ]
+
+// Phone: the four things patients do most, always one tap away; everything else under More.
+const TABS = [
+  { key: 'home', label: 'Home', icon: House },
+  { key: 'send', label: 'Send', icon: Upload },
+  { key: 'documents', label: 'Reports', icon: FolderOpen },
+  { key: 'appointments', label: 'Appointments', icon: CalendarDays },
+]
+
+function PatientTabs({ screen, go, openMore }) {
+  const current = ['photo', 'external'].includes(screen) ? 'send' : screen
+  const cls = (active) => `flex w-full flex-col items-center gap-0.5 px-1 py-2 text-[11px] font-semibold leading-tight ${
+    active ? 'text-brand-700' : 'text-muted hover:text-ink'}`
+  return (
+    <ul className="flex">
+      {TABS.map(({ key, label, icon: Icon }) => (
+        <li key={key} className="flex-1">
+          <button type="button" onClick={() => go(key)} aria-current={current === key ? 'page' : undefined} className={cls(current === key)}>
+            <Icon size={22} aria-hidden="true" /> {label}
+          </button>
+        </li>
+      ))}
+      <li className="flex-1">
+        <button type="button" onClick={openMore} className={cls(false)}><Menu size={22} aria-hidden="true" /> More</button>
+      </li>
+    </ul>
+  )
+}
 
 function PatientSidebar({ patient, screen, go, onSignOut }) {
   const item = (active) =>
@@ -564,128 +594,102 @@ function AgeScreen({ onSaved, onLater }) {
 
 /* ============================================================== home */
 
-const ACTIONS = [
-  { key: 'tests', icon: ClipboardList, title: 'My tests', text: 'Tests your doctor asked for, and by when' },
-  { key: 'appointments', icon: CalendarDays, title: 'Book an appointment', text: 'Choose a time with your doctor' },
-  { key: 'refill', icon: Pill, title: 'My medicine refill', text: 'Send the bill when you buy your medicine' },
-  { key: 'sugar', icon: Droplet, title: "Today's sugar reading", text: 'Type the number from your meter' },
-  { key: 'external', icon: FlaskConical, title: 'Send a test report', text: 'HbA1c or sugar test done at another lab' },
-  { key: 'photo', icon: Camera, title: 'Send a photo', text: 'Prescription or lab report (optional)' },
-  { key: 'documents', icon: FolderOpen, title: 'My documents', text: 'See what you have sent' },
-  { key: 'doctors', icon: Stethoscope, title: 'My doctors', text: 'Choose who can see your records' },
+const QUICK = [
+  { key: 'sugar', icon: Droplet, label: 'Sugar reading' },
+  { key: 'refill', icon: Pill, label: 'Medicine bill' },
+  { key: 'appointments', icon: CalendarDays, label: 'Appointments' },
+  { key: 'tests', icon: ClipboardList, label: 'My tests' },
 ]
 
-const DOC_LABEL = {
-  lab_report: 'Lab report', prescription: 'Prescription', glucometer_photo: 'Meter photo', other: 'Document',
-  external: 'Test report', medicine_bill: 'Medicine bill',
-}
-const BILL_TONE = { pending_review: 'warn', reviewed_approved: 'ok', reviewed_rejected: 'alert' }
+// One status language everywhere: Checking -> Checked, or Resend (with the reason when there is one).
 const STATUS = {
-  pending: { label: 'Waiting for your care team', tone: 'info' },
-  confirmed: { label: 'Checked by your care team', tone: 'ok' },
-  rejected: { label: 'Not accepted', tone: 'alert' },
+  pending: { label: 'Checking', tone: 'info' },
+  confirmed: { label: 'Checked', tone: 'ok' },
+  rejected: { label: 'Resend', tone: 'alert' },
 }
-const docName = (d) => `${DOC_LABEL[d.document_type]}${d.description ? `: ${d.description}` : ''}`
 const EXTERNAL_STATUS = { pending_review: 'pending', reviewed: 'confirmed', rejected: 'rejected' }
-// Everything the patient sent, newest first: documents plus reports from outside labs.
+const BILL_STATUS = { pending_review: 'pending', reviewed_approved: 'confirmed', reviewed_rejected: 'rejected' }
+// Everything the patient sent, newest first: documents, test reports and medicine bills.
 async function loadMyDocuments() {
   const [docs, external, bills] = await Promise.all([api.myDocuments(), api.myExternalReports(), api.myBills()])
   return [
     ...bills.map((x) => ({
       key: `b${x.id}`, document_type: 'medicine_bill', description: null, uploaded_at: x.upload_date,
-      url: api.myBillUrl(x.id), tag: x.status_text, tagTone: BILL_TONE[x.status],
+      url: api.myBillUrl(x.id), review_status: BILL_STATUS[x.status], reason: x.reject_reason,
     })),
     ...docs.map((d) => ({ ...d, key: `d${d.id}`, url: api.myDocumentUrl(d.id) })),
     ...external.map((x) => ({
       key: `x${x.id}`, document_type: 'external', description: x.test_label, uploaded_at: x.upload_date,
-      review_status: EXTERNAL_STATUS[x.status], url: api.myExternalReportUrl(x.id), test_date: x.test_date,
+      review_status: EXTERNAL_STATUS[x.status], url: api.myExternalReportUrl(x.id),
     })),
   ].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at))
 }
-const DocStatus = ({ status, tag, tone }) => (tag
-  ? <Badge tone={tone} className="text-sm!">{tag}</Badge>
-  : <Badge tone={STATUS[status]?.tone ?? 'neutral'} className="text-sm!">{STATUS[status]?.label ?? status}</Badge>)
+
+function DocName({ d }) {
+  if (d.document_type === 'prescription') return 'Prescription'
+  if (d.document_type === 'medicine_bill') return 'Medicine bill'
+  if (d.document_type === 'glucometer_photo') return 'Meter photo'
+  if (d.description && ['lab_report', 'external'].includes(d.document_type)) return <><TestName name={d.description} /> report</>
+  return d.document_type === 'other' ? 'Document' : 'Lab report'
+}
+const DocStatus = ({ status }) => <Badge tone={STATUS[status]?.tone ?? 'neutral'} className="text-sm!">{STATUS[status]?.label ?? status}</Badge>
 
 function HomeScreen({ shell, patient, go, onDone }) {
-  const [doctors, setDoctors] = useState(null)
   const [docs, setDocs] = useState(null)
   useEffect(() => {
-    api.myDoctors().then(setDoctors).catch(() => setDoctors([]))
     loadMyDocuments().then(setDocs).catch(() => setDocs([]))
   }, [])
 
   return (
     <AppShell {...shell} title={`Hello, ${patient.first_name}`} breadcrumbs={[{ label: 'Home' }]}
-      subtitle={<>Patient ID <strong className="text-ink tnum">{patient.patient_code}</strong></>}
-      actions={<button type="button" onClick={() => go('sugar')} className={b.primary}><Droplet size={18} aria-hidden="true" /> Log a sugar reading</button>}>
+      subtitle={<span className="tnum">ID {patient.patient_code}</span>}>
       <PendingConsents patient={patient} onDone={onDone} />
       <CareTeamMessages go={go} />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem]">
-        <Panel large title="What would you like to do?" bodyClass="">
-          <ul className="divide-y divide-line">
-            {ACTIONS.map(({ key, icon: Icon, title, text }) => (
+      <div className="grid max-w-5xl gap-4 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+        <div className="space-y-4">
+          <button type="button" onClick={() => go('send')}
+            className="flex w-full items-center gap-4 rounded-lg bg-brand-700 px-5 py-5 text-left text-white hover:bg-brand-800">
+            <Upload size={28} aria-hidden="true" className="shrink-0" />
+            <span className="flex-1">
+              <span className="block text-xl font-semibold">Send report</span>
+              <span className="block text-sm text-white/85">Prescription or lab report</span>
+            </span>
+            <ChevronRight size={22} aria-hidden="true" className="shrink-0" />
+          </button>
+
+          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {QUICK.map(({ key, icon: Icon, label }) => (
               <li key={key}>
-                <button type="button" onClick={() => go(key)} className="flex w-full items-center gap-4 px-4 py-3.5 text-left hover:bg-subtle">
-                  <Icon size={22} aria-hidden="true" className="shrink-0 text-brand-700" />
-                  <span className="flex-1">
-                    <span className="block text-base font-semibold text-ink">{title}</span>
-                    <span className="block text-sm text-muted">{text}</span>
-                  </span>
-                  <ChevronRight size={20} aria-hidden="true" className="shrink-0 text-muted" />
+                <button type="button" onClick={() => go(key)}
+                  className="flex h-full w-full flex-col items-center gap-2 rounded-lg border border-line bg-surface px-2 py-4 text-center text-[15px] font-semibold text-ink hover:border-brand-600 hover:bg-subtle">
+                  <Icon size={24} aria-hidden="true" className="text-brand-700" /> {label}
                 </button>
               </li>
             ))}
           </ul>
-        </Panel>
 
-        <div className="space-y-4">
-          <MyAppointments go={go} />
-
-          <Panel large title="My doctors" description="Only these doctors can see your records" bodyClass=""
-            actions={<button type="button" onClick={() => go('doctors')} className={`${link} text-sm`}>Manage</button>}>
-            {doctors === null ? <p className="px-4 py-4 text-sm text-muted">Loading…</p>
-              : doctors.length === 0 ? (
-                <div className="px-4 py-4">
-                  <p className="text-base text-muted">No doctors yet. Your records are not shared with anyone.</p>
-                  <button type="button" onClick={() => go('doctors')} className={`${b.secondary} mt-3`}><Stethoscope size={18} aria-hidden="true" /> Add my doctor</button>
-                </div>
-              ) : (
-                <ul className="divide-y divide-line">
-                  {doctors.map((d) => (
-                    <li key={d.clinician_code} className="px-4 py-2.5">
-                      <span className="block text-base font-medium text-ink">{d.full_name}</span>
-                      <span className="block text-sm text-muted tnum">ID {d.clinician_code}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-          </Panel>
-
-          <MyBills go={go} />
-
-          <Panel large title="Recently sent" description="Photos and reports you sent" bodyClass=""
-            actions={docs?.length > 0 && <button type="button" onClick={() => go('documents')} className={`${link} text-sm`}>All documents</button>}>
+          <Panel large title="Recent" bodyClass=""
+            actions={docs?.length > 0 && <button type="button" onClick={() => go('documents')} className={`${link} text-sm`}>All</button>}>
             {docs === null ? <p className="px-4 py-4 text-sm text-muted">Loading…</p>
               : docs.length === 0 ? <p className="px-4 py-4 text-base text-muted">Nothing sent yet.</p> : (
                 <ul className="divide-y divide-line">
-                  {docs.slice(0, 3).map((d) => (
-                    <li key={d.key} className="px-4 py-2.5">
-                      <span className="block text-base font-medium text-ink">{docName(d)}</span>
-                      <span className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted">
-                        <span className="tnum">Sent {formatDate(d.uploaded_at)}</span> <DocStatus status={d.review_status} tag={d.tag} tone={d.tagTone} />
+                  {docs.slice(0, 4).map((d) => (
+                    <li key={d.key} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                      <span className="min-w-0">
+                        <span className="block text-base font-medium text-ink"><DocName d={d} /></span>
+                        <span className="block text-sm text-muted tnum">{formatDate(d.uploaded_at)}</span>
                       </span>
+                      <DocStatus status={d.review_status} />
                     </li>
                   ))}
                 </ul>
               )}
           </Panel>
         </div>
-      </div>
 
-      <button type="button" onClick={() => go('password')} className={`${link} mt-5 inline-flex items-center gap-1.5 text-base`}>
-        <KeyRound size={16} aria-hidden="true" /> Change my password
-      </button>
+        <ComingUp go={go} />
+      </div>
     </AppShell>
   )
 }
@@ -727,19 +731,39 @@ function CareTeamMessages({ go }) {
   )
 }
 
-// Home: the patient's booked appointments, straight from the server - confirmed the moment they book.
-function MyAppointments({ go }) {
-  const [list, setList] = useState(null)
+// Home: what is next - booked appointments and tests still to do.
+function ComingUp({ go }) {
+  const [appts, setAppts] = useState(null)
+  const [tests, setTests] = useState(null)
   useEffect(() => {
-    api.myAppointments().then((d) => setList(d.appointments)).catch(() => setList([]))
+    api.myAppointments().then((d) => setAppts(d.appointments)).catch(() => setAppts([]))
+    api.myTests().then((d) => setTests(d.todo)).catch(() => setTests([]))
   }, [])
   return (
-    <Panel large title="My appointments" bodyClass=""
-      actions={<button type="button" onClick={() => go('appointments')} className={`${link} text-sm`}>Book</button>}>
-      {list === null ? <p className="px-4 py-4 text-sm text-muted">Loading…</p>
-        : list.length === 0 ? <p className="px-4 py-4 text-base text-muted">No appointment booked.</p> : (
-          <ul className="divide-y divide-line">{list.map((a) => <AppointmentRow key={a.id} a={a} />)}</ul>
-        )}
+    <Panel large title="Coming up" bodyClass="">
+      {appts === null || tests === null ? <p className="px-4 py-4 text-sm text-muted">Loading…</p> : (
+        <ul className="divide-y divide-line">
+          {appts.length === 0 ? (
+            <li className="flex items-center justify-between gap-3 px-4 py-3">
+              <span className="text-base text-muted">No appointment</span>
+              <button type="button" onClick={() => go('appointments')} className={`${link} text-base`}>Book</button>
+            </li>
+          ) : appts.slice(0, 2).map((a) => <AppointmentRow key={a.id} a={a} />)}
+          {tests.slice(0, 3).map((t) => (
+            <li key={t.id}>
+              <button type="button" onClick={() => go('tests')} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-subtle">
+                <ClipboardList size={20} aria-hidden="true" className="shrink-0 text-brand-700" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-base font-semibold text-ink">{t.name}</span>
+                  <span className={`block text-sm tnum ${t.overdue ? 'font-semibold text-alert-800' : 'text-muted'}`}>
+                    {t.overdue ? 'Overdue' : 'Due'} {formatDate(t.due_by)}</span>
+                </span>
+                <ChevronRight size={20} aria-hidden="true" className="shrink-0 text-muted" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </Panel>
   )
 }
@@ -755,39 +779,6 @@ function AppointmentRow({ a }) {
       <span className="block text-sm text-muted">{a.doctor_name}</span>
       {rebook && a.notice && <p className="mt-1.5 text-sm text-ink">{a.notice.message}</p>}
     </li>
-  )
-}
-
-// Every bill the patient sent, with its status always visible.
-function MyBills({ go }) {
-  const [bills, setBills] = useState(null)
-  useEffect(() => {
-    api.myBills().then(setBills).catch(() => setBills([]))
-  }, [])
-  const latest = bills?.[0]
-  return (
-    <Panel large title="My medicine bills" description="Checked by your care team" bodyClass=""
-      actions={<button type="button" onClick={() => go('refill')} className={`${link} text-sm`}>Upload a bill</button>}>
-      {bills === null ? <p className="px-4 py-4 text-sm text-muted">Loading…</p>
-        : bills.length === 0 ? <p className="px-4 py-4 text-base text-muted">No bills sent yet.</p> : (
-          <ul className="divide-y divide-line">
-            {bills.slice(0, 4).map((x) => (
-              <li key={x.id} className="px-4 py-2.5">
-                <span className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-base font-medium text-ink tnum">Bill · {formatDate(x.upload_date)}</span>
-                  <Badge tone={BILL_TONE[x.status]} className="text-sm!">{x.status === 'reviewed_rejected' ? 'Rejected' : x.status_text}</Badge>
-                </span>
-                {x.status === 'reviewed_rejected' && <span className="mt-0.5 block text-sm text-alert-800">{x.reject_reason}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
-      {latest?.status === 'reviewed_rejected' && (
-        <div className="border-t border-line px-4 py-3">
-          <button type="button" onClick={() => go('refill')} className={`${b.primary} w-full`}><Upload size={18} aria-hidden="true" /> Upload a new bill</button>
-        </div>
-      )}
-    </Panel>
   )
 }
 
@@ -864,8 +855,7 @@ function RefillScreen({ shell, crumbs, onBack, onDone }) {
   }
 
   return (
-    <AppShell {...shell} title="Medicine refill" subtitle="When you buy your diabetes medicine, send a photo of the bill."
-      breadcrumbs={crumbs({ label: 'Medicine refill' })}>
+    <AppShell {...shell} title="Medicine bill" breadcrumbs={crumbs({ label: 'Medicine bill' })}>
       <form onSubmit={submit} className="max-w-xl rounded-lg border border-line bg-surface">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
           <h2 className="text-base font-semibold text-ink">Upload your medicine bill</h2>
@@ -934,8 +924,7 @@ function SugarScreen({ shell, crumbs, onBack, onDone }) {
   }
 
   return (
-    <AppShell {...shell} title="Today's sugar reading" subtitle="Type the number shown on your glucose meter."
-      breadcrumbs={crumbs({ label: 'Sugar reading' })}>
+    <AppShell {...shell} title="Sugar reading" breadcrumbs={crumbs({ label: 'Sugar reading' })}>
       <FormPanel onSubmit={submit} title="Your reading"
         footer={<>
           <button type="button" onClick={onBack} className={b.secondary}>Cancel</button>
@@ -973,174 +962,199 @@ function SugarScreen({ shell, crumbs, onBack, onDone }) {
   )
 }
 
-const KINDS = [
-  { key: 'prescription', label: 'Prescription', text: 'A prescription from any doctor' },
-  { key: 'lab_report', label: 'Lab report', text: 'A full lab report with several results' },
-  { key: 'external', label: 'Test report from another lab', text: 'One HbA1c or sugar test done outside the hospital' },
-]
+/* ============================================================== send report */
 
-function PhotoScreen({ shell, crumbs, go, onBack, onDone }) {
+// The one way to send a paper: prescription, or a lab report of a chosen test (required). One or several pages -
+// they arrive as one file. The date is recorded when it is sent; the care team reads the date on the report.
+const MAX_PAGES = 10
+
+function SendReportScreen({ shell, crumbs, onBack, onDone }) {
+  const tests = useReportTests()
   const [kind, setKind] = useState(null)
-  const [file, setFile] = useState(null)
-  const [reportType, setReportType] = useState('')
+  const [test, setTest] = useState('')
+  const [testName, setTestName] = useState('')
+  const [pages, setPages] = useState([])
+  const [progress, setProgress] = useState(null)
   const { busy, error, setError, run } = useSubmit()
-  const isLab = kind === 'lab_report'
-  const typed = reportType.trim()
-  const reset = () => { setKind(null); setFile(null); setReportType(''); setError('') }
+  const urls = useRef([])
+  useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), [])
+
+  const add = (e) => {
+    const chosen = [...(e.target.files ?? [])]
+    e.target.value = ''
+    setError('')
+    const room = MAX_PAGES - pages.length
+    if (chosen.length > room) setError(`Up to ${MAX_PAGES} pages.`)
+    const added = chosen.slice(0, Math.max(room, 0)).map((file, i) => {
+      const url = file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+      if (url) urls.current.push(url)
+      return { id: `${Date.now()}-${i}-${file.name}`, file, url }
+    })
+    setPages((p) => [...p, ...added])
+  }
+  const remove = (id) => setPages((p) => p.filter((x) => x.id !== id))
+  const lab = kind === 'lab_report'
+  const other = test === 'other'
+  const ready = kind && pages.length > 0 && (!lab || (test && (!other || testName.trim().length >= 2)))
 
   const submit = (e) => {
     e.preventDefault()
-    if (isLab && typed.length < 2) {
-      setError('Please write what type of report this is.')
-      return
-    }
-    if (!file) {
-      setError('Please take a photo or choose a file first.')
-      return
-    }
-    run(async () => onDone((await api.upload(kind, file, isLab ? typed : null)).message))
+    if (!ready) return
+    setProgress(0)
+    run(async () => {
+      const r = await api.sendReport({ kind, test: lab ? test : null, testName: other ? testName.trim() : null,
+        files: pages.map((p) => p.file) }, setProgress)
+      onDone(r.message)
+    }).finally(() => setProgress(null))
   }
 
-  if (!kind) {
-    return (
-      <AppShell {...shell} title="Send a document" subtitle="Send a photo or PDF to your care team."
-        breadcrumbs={crumbs({ label: 'Send a document' })}>
-        <Panel large title="What are you sending?" bodyClass="" className="max-w-xl">
-          <ul className="divide-y divide-line">
-            {KINDS.map((k) => (
-              <li key={k.key}>
-                <button type="button" onClick={() => (k.key === 'external' ? go('external') : setKind(k.key))}
-                  className="flex w-full items-center gap-4 px-4 py-3.5 text-left hover:bg-subtle">
-                  {k.key === 'external' ? <FlaskConical size={22} aria-hidden="true" className="shrink-0 text-brand-700" />
-                    : <FileText size={22} aria-hidden="true" className="shrink-0 text-brand-700" />}
-                  <span className="flex-1">
-                    <span className="block text-base font-semibold text-ink">{k.label}</span>
-                    <span className="block text-sm text-muted">{k.text}</span>
-                  </span>
-                  <ChevronRight size={20} aria-hidden="true" className="shrink-0 text-muted" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-        <button type="button" onClick={onBack} className={`${link} mt-4 text-base`}>Cancel and go home</button>
-      </AppShell>
-    )
-  }
-
-  const label = isLab ? 'Lab report' : 'Prescription'
+  const segment = (active) => `flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-base font-semibold ${
+    active ? 'bg-surface text-ink shadow-sm ring-1 ring-line' : 'text-muted hover:text-ink'}`
   return (
-    <AppShell {...shell} title={`Send your ${isLab ? 'lab report' : 'prescription'}`} subtitle="Your care team checks it before using it."
-      breadcrumbs={crumbs({ label: 'Send a document', onClick: reset }, { label })}>
-      <FormPanel onSubmit={submit} title={label}
-        footer={<>
-          <button type="button" onClick={reset} className={b.secondary}>Back</button>
-          <button type="submit" disabled={busy || !file || (isLab && typed.length < 2)} className={b.primary}>
-            <Upload size={18} aria-hidden="true" /> {busy ? 'Sending…' : 'Send to my care team'}
-          </button>
-        </>}>
-        {isLab && (
-          <PField label="What type of report is this?" htmlFor="report-type" required hintId="report-type-hint"
-            hint="For example: HbA1c, sugar test, kidney test, cholesterol">
-            <input id="report-type" value={reportType} maxLength={100} required aria-describedby="report-type-hint"
-              onChange={(e) => { setReportType(e.target.value); setError('') }}
-              placeholder="Type the report name" className={field} />
-          </PField>
-        )}
-        <div>
-          <p className="text-base font-semibold text-ink">
-            Photo or PDF<span className="ml-0.5 text-alert-700" aria-hidden="true">*</span>
-          </p>
-          <label className="mt-1.5 flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-line-strong bg-subtle p-4 text-center hover:border-brand-600">
-            <Camera size={28} className="text-brand-700" aria-hidden="true" />
-            <span className="text-base font-semibold text-brand-800">{file ? 'Choose a different file' : 'Take a photo or choose a PDF'}</span>
-            <input type="file" accept="image/*,application/pdf" className="sr-only" aria-label="Photo or PDF of the document"
-              onChange={(e) => { setFile(e.target.files?.[0] ?? null); setError('') }} />
-          </label>
-          {file && <p className="mt-2 break-all text-base text-ink">Selected: <strong>{file.name}</strong></p>}
+    <AppShell {...shell} title="Send report" breadcrumbs={crumbs({ label: 'Send report' })}>
+      <form onSubmit={submit} className="max-w-xl rounded-lg border border-line bg-surface">
+        <div className="space-y-5 px-5 py-5">
+          <fieldset>
+            <legend className="text-sm font-semibold text-ink">Report type</legend>
+            <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-lg bg-subtle p-1">
+              <label className={`cursor-pointer ${segment(kind === 'prescription')}`}>
+                <input type="radio" name="kind" className="sr-only" checked={kind === 'prescription'} onChange={() => setKind('prescription')} />
+                <FileText size={18} aria-hidden="true" /> Prescription
+              </label>
+              <label className={`cursor-pointer ${segment(lab)}`}>
+                <input type="radio" name="kind" className="sr-only" checked={lab} onChange={() => setKind('lab_report')} />
+                <FlaskConical size={18} aria-hidden="true" /> Lab report
+              </label>
+            </div>
+          </fieldset>
+
+          {lab && (
+            <div>
+              <label htmlFor="report-test" className="text-sm font-semibold text-ink">
+                Test<span className="ml-0.5 text-alert-700" aria-hidden="true">*</span>
+              </label>
+              <div className="mt-1.5">
+                {tests ? <TestSelect id="report-test" tests={tests.tests} value={test} onChange={setTest} />
+                  : <p className="text-sm text-muted">Loading…</p>}
+              </div>
+              {other && (
+                <input aria-label="Test name" value={testName} maxLength={80} onChange={(e) => setTestName(e.target.value)}
+                  placeholder="Test name" className={`${input} mt-2 h-11! text-base!`} />
+              )}
+            </div>
+          )}
+
+          {kind && (
+            <div>
+              <p className="flex items-baseline justify-between text-sm font-semibold text-ink">
+                <span>Pages<span className="ml-0.5 text-alert-700" aria-hidden="true">*</span></span>
+                <span className="font-normal text-muted tnum">{pages.length} / {MAX_PAGES}</span>
+              </p>
+              {pages.length > 0 && (
+                <ol className="mt-1.5 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {pages.map((p, i) => (
+                    <li key={p.id} className="relative overflow-hidden rounded-md border border-line bg-subtle">
+                      {p.url ? <img src={p.url} alt={`Page ${i + 1}`} className="aspect-[3/4] w-full object-cover object-top" />
+                        : <span className="flex aspect-[3/4] w-full items-center justify-center text-sm font-semibold text-muted">PDF</span>}
+                      <span className="absolute bottom-1 left-1 rounded bg-ink/75 px-1.5 text-xs font-semibold text-white tnum">{i + 1}</span>
+                      <button type="button" onClick={() => remove(p.id)} aria-label={`Remove page ${i + 1}`}
+                        className="absolute right-1 top-1 rounded-full bg-surface/90 p-1 text-ink shadow-sm hover:bg-surface"><X size={14} aria-hidden="true" /></button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {pages.length < MAX_PAGES && (
+                <div className="mt-1.5 flex flex-wrap items-center justify-center gap-2 rounded-md border border-dashed border-line-strong px-3 py-4">
+                  <label className={`${btn.secondary} h-10! cursor-pointer px-4! text-base!`}>
+                    <Camera size={18} aria-hidden="true" /> Take photo
+                    <input type="file" accept="image/jpeg,image/png" capture="environment" className="sr-only" aria-label="Take a photo of a page" onChange={add} />
+                  </label>
+                  <label className={`${btn.secondary} h-10! cursor-pointer px-4! text-base!`}>
+                    <Plus size={18} aria-hidden="true" /> Choose files
+                    <input type="file" multiple accept="image/jpeg,image/png,application/pdf" className="sr-only" aria-label="Choose photos or PDF" onChange={add} />
+                  </label>
+                  <span className="w-full text-center text-xs text-muted">JPG, PNG or PDF</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          <Alert>{error}</Alert>
+          {progress !== null && (
+            <div className="h-1.5 overflow-hidden rounded-full bg-subtle" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Sending">
+              <div className="h-full bg-brand-600" style={{ width: `${progress}%` }} />
+            </div>
+          )}
         </div>
-        <Alert>{error}</Alert>
-      </FormPanel>
+
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-subtle px-5 py-3">
+          <span className="text-sm text-muted tnum">{kind ? `Date: ${formatDate(todayIso())} (auto)` : ''}</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={onBack} className={`${btn.ghost} h-11! px-4! text-base!`}>Cancel</button>
+            <button type="submit" disabled={!ready || busy} className={`${btn.primary} h-11! px-6! text-base! font-semibold`}>
+              <Upload size={18} aria-hidden="true" /> {busy ? 'Sending…' : 'Send'}
+            </button>
+          </div>
+        </footer>
+      </form>
     </AppShell>
   )
 }
 
-/* ============================================================== External Report Review: upload */
-
-const TEST_TYPES = [
-  ['HbA1c', 'HbA1c (3-month sugar)'],
-  ['Fasting Sugar', 'Fasting Sugar (before breakfast)'],
-  ['PP Sugar', 'PP Sugar (after a meal)'],
-  ['Other', 'Other test'],
-]
-
-// The patient sends the report only - type, date and file. The care team reads it and enters the value.
-function ExternalReportScreen({ shell, crumbs, onBack, onDone }) {
-  const [testType, setTestType] = useState('')
-  const [testName, setTestName] = useState('')
-  const [testDate, setTestDate] = useState('')
-  const [file, setFile] = useState(null)
-  const [errors, setErrors] = useState({})
-  const { busy, error, run } = useSubmit()
-  const other = testType === 'Other'
-
-  const submit = (e) => {
-    e.preventDefault()
-    const problems = {
-      testType: !testType && 'Please choose the type of test.',
-      testName: other && testName.trim().length < 2 && 'Please write which test this is.',
-      testDate: !testDate ? 'Please choose the date of the test.' : testDate > todayIso() && 'The test date cannot be in the future.',
-      file: !file && 'Please take a photo of the report or choose a PDF.',
-    }
-    setErrors(problems)
-    if (Object.values(problems).some(Boolean)) return
-    run(async () => onDone((await api.uploadExternalReport({ testType, testName: other ? testName.trim() : null, testDate, file })).message))
+// The test, chosen from a list that drops down under the button. Short names only; the full name and why the test
+// is done show on hover (long press on a phone). Keyboard: arrows move, Enter chooses, Escape closes.
+function TestSelect({ id, tests, value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(0)
+  const box = useRef(null)
+  const button = useRef(null)
+  const list = useRef(null)
+  const current = tests.find((t) => t.key === value)
+  useEffect(() => {
+    if (!open) return undefined
+    list.current?.focus()
+    const away = (e) => { if (!box.current?.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [open])
+  const toggle = () => {
+    setActive(Math.max(0, tests.findIndex((t) => t.key === value)))
+    setOpen((o) => !o)
   }
-  const clear = (k) => setErrors((x) => ({ ...x, [k]: null }))
-
+  const choose = (t) => {
+    onChange(t.key)
+    setOpen(false)
+    button.current?.focus()
+  }
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((i) => Math.min(i + 1, tests.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((i) => Math.max(i - 1, 0)) }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(tests[active]) }
+    else if (e.key === 'Escape') { e.preventDefault(); setOpen(false); button.current?.focus() }
+    else if (e.key === 'Tab') setOpen(false)
+  }
   return (
-    <AppShell {...shell} title="Send a test report" subtitle="For a test you had done at another lab or clinic. You don’t need to type the result."
-      breadcrumbs={crumbs({ label: 'Send a test report' })}>
-      <FormPanel onSubmit={submit} title="About the test" description="Your care team reads the report and enters the result."
-        footer={<>
-          <button type="button" onClick={onBack} className={b.secondary}>Cancel</button>
-          <button type="submit" disabled={busy} className={b.primary}><Upload size={18} aria-hidden="true" /> {busy ? 'Uploading…' : 'Upload report'}</button>
-        </>}>
-        <PField label="Test type" htmlFor="x-type" required error={errors.testType}>
-          <select id="x-type" value={testType} onChange={(e) => { setTestType(e.target.value); clear('testType') }} className={`${field} sm:max-w-80`}>
-            <option value="">Choose…</option>
-            {TEST_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-          </select>
-        </PField>
-        {other && (
-          <PField label="Which test?" htmlFor="x-name" required error={errors.testName} hint="As written on the report, e.g. Vitamin D, Creatinine">
-            <input id="x-name" value={testName} maxLength={80} onChange={(e) => { setTestName(e.target.value); clear('testName') }} className={field} />
-          </PField>
-        )}
-        <PField label="Date of the test" htmlFor="x-date" required error={errors.testDate} hint="The day the test was done — usually printed on the report.">
-          <input id="x-date" type="date" value={testDate} max={todayIso()} onChange={(e) => { setTestDate(e.target.value); clear('testDate') }}
-            className={`${field} sm:max-w-60`} />
-        </PField>
-        <div>
-          <p className="text-base font-semibold text-ink">
-            Photo or PDF of the report<span className="ml-0.5 text-alert-700" aria-hidden="true">*</span>
-          </p>
-          <label className="mt-1.5 flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-line-strong bg-subtle p-4 text-center hover:border-brand-600">
-            <Camera size={28} className="text-brand-700" aria-hidden="true" />
-            <span className="text-base font-semibold text-brand-800">{file ? 'Choose a different file' : 'Take a photo or choose a PDF'}</span>
-            <input type="file" accept="image/*,application/pdf" className="sr-only" aria-label="Photo or PDF of the test report"
-              onChange={(e) => { setFile(e.target.files?.[0] ?? null); clear('file') }} />
-          </label>
-          {file && <p className="mt-2 break-all text-base text-ink">Selected: <strong>{file.name}</strong></p>}
-          {errors.file && (
-            <p className="mt-1.5 flex items-start gap-1.5 text-sm font-medium text-alert-800">
-              <AlertTriangle size={15} aria-hidden="true" className="mt-0.5 shrink-0" /> {errors.file}
-            </p>
-          )}
-        </div>
-        <Alert>{error}</Alert>
-      </FormPanel>
-    </AppShell>
+    <div ref={box} className="relative">
+      <button ref={button} id={id} type="button" aria-haspopup="listbox" aria-expanded={open} onClick={toggle}
+        className={`${input} flex h-11! items-center justify-between gap-2 text-left text-base! ${current ? 'font-semibold text-ink' : 'text-muted'}`}>
+        {current ? current.short : 'Select test'}
+        <ChevronDown size={18} aria-hidden="true" className={`shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <ul ref={list} role="listbox" tabIndex={-1} aria-labelledby={id} aria-activedescendant={`${id}-${tests[active]?.key}`} onKeyDown={onKey}
+          className="absolute inset-x-0 z-30 mt-1 max-h-80 overflow-y-auto rounded-md border border-line bg-surface py-1 shadow-lg outline-none">
+          {tests.map((t, i) => (
+            <li key={t.key} id={`${id}-${t.key}`} role="option" aria-selected={t.key === value}
+              onMouseEnter={() => setActive(i)} onClick={() => choose(t)}
+              className={`flex cursor-pointer items-center gap-2.5 px-3 py-2.5 text-base ${i === active ? 'bg-subtle' : ''} ${
+                t.key === value ? 'font-semibold text-brand-800' : 'text-ink'}`}>
+              <Check size={16} aria-hidden="true" className={t.key === value ? 'text-brand-700' : 'invisible'} />
+              <Tip short={t.short} full={t.full} why={t.why} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -1153,26 +1167,25 @@ function DocumentsScreen({ shell, crumbs, go }) {
     loadMyDocuments().then(setDocs).catch((e) => setError(e.message))
   }, [])
   return (
-    <AppShell {...shell} title="My documents" subtitle="Everything you have sent to your care team."
-      breadcrumbs={crumbs({ label: 'My documents' })}
-      actions={<button type="button" onClick={() => go('photo')} className={b.primary}><Upload size={18} aria-hidden="true" /> Send a document</button>}>
+    <AppShell {...shell} title="My reports" breadcrumbs={crumbs({ label: 'My reports' })}
+      actions={<button type="button" onClick={() => go('send')} className={b.primary}><Upload size={18} aria-hidden="true" /> Send report</button>}>
       <Alert>{error}</Alert>
-      <Panel large title={`Sent documents${docs ? ` (${docs.length})` : ''}`} bodyClass="">
+      <Panel large title={`Sent${docs ? ` (${docs.length})` : ''}`} bodyClass="">
         {!docs && !error && <p className="px-4 py-6 text-base text-muted">Loading…</p>}
-        {docs && docs.length === 0 && <p className="px-4 py-6 text-base text-muted">You have not sent any documents yet.</p>}
+        {docs && docs.length === 0 && <p className="px-4 py-6 text-base text-muted">Nothing sent yet.</p>}
         {docs && docs.length > 0 && (
           <>
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full">
                 <thead className="border-b border-line bg-subtle"><tr>
-                  <th className={th}>Document</th><th className={th}>Sent</th><th className={th}>Status</th><th className={th}><span className="sr-only">Open</span></th>
+                  <th className={th}>Report</th><th className={th}>Sent</th><th className={th}>Status</th><th className={th}><span className="sr-only">Open</span></th>
                 </tr></thead>
                 <tbody className="divide-y divide-line">
                   {docs.map((d) => (
                     <tr key={d.key} className="hover:bg-subtle">
-                      <td className={`${td} text-base!`}>{docName(d)}</td>
+                      <td className={`${td} text-base!`}><DocName d={d} /></td>
                       <td className={`${td} text-base! whitespace-nowrap text-muted tnum`}>{formatDate(d.uploaded_at)}</td>
-                      <td className={td}><DocStatus status={d.review_status} tag={d.tag} tone={d.tagTone} /></td>
+                      <td className={td}><DocStatus status={d.review_status} />{d.reason && <span className="mt-0.5 block text-sm text-alert-800">{d.reason}</span>}</td>
                       <td className={`${td} text-right`}>
                         <a href={d.url} target="_blank" rel="noreferrer" className={`${link} text-base`}>Open</a>
                       </td>
@@ -1186,9 +1199,10 @@ function DocumentsScreen({ shell, crumbs, go }) {
                 <li key={d.key}>
                   <a href={d.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 px-4 py-3 hover:bg-subtle">
                     <span className="min-w-0 flex-1">
-                      <span className="block text-base font-semibold text-ink">{docName(d)}</span>
+                      <span className="block text-base font-semibold text-ink"><DocName d={d} /></span>
                       <span className="block text-sm text-muted tnum">Sent {formatDate(d.uploaded_at)}</span>
-                      <span className="mt-1 block"><DocStatus status={d.review_status} tag={d.tag} tone={d.tagTone} /></span>
+                      <span className="mt-1 block"><DocStatus status={d.review_status} /></span>
+                      {d.reason && <span className="mt-0.5 block text-sm text-alert-800">{d.reason}</span>}
                     </span>
                     <ChevronRight size={20} aria-hidden="true" className="shrink-0 text-muted" />
                   </a>

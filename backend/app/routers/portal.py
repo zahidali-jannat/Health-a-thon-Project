@@ -9,7 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .. import abdm_mock as abdm
-from .. import repo, storage
+from .. import report_tests, repo, storage
 from ..config import DEFAULT_CONFIG
 from ..deps import current_patient, get_conn, now, read_upload, today
 from ..detection import fmt
@@ -154,6 +154,56 @@ async def upload_document(kind: Literal["prescription", "lab_report"] = Form(...
     conn.commit()
     label = "prescription" if kind == "prescription" else f"lab report ({description})"
     return {"id": doc_id, "message": f"Thank you. Your {label} was sent to your care team."}
+
+
+# ------------------------------------------------------------------ Send report: the one way a patient sends a paper
+# Prescription, or a lab report of a chosen type. One or several pages (merged into one file, in order).
+# The date is the upload time - the patient never types it; the care team checks the date printed on the report.
+
+@router.post("/reports")
+async def send_report(kind: Literal["prescription", "lab_report"] = Form(...), test: str | None = Form(None),
+                      test_name: str | None = Form(None, max_length=80), files: list[UploadFile] = File(...),
+                      patient=Depends(current_patient), conn=Depends(get_conn)):
+    t, name = None, (test_name or "").strip()
+    if kind == "lab_report":
+        t = report_tests.test(test or "")
+        if t is None:
+            raise HTTPException(422, "Please choose the test.")
+        if t["key"] == "other" and len(name) < 2:
+            raise HTTPException(422, "Please write the test name.")
+    pages = []
+    for f in files:
+        data = await read_upload(f)
+        content_type = report_tests.sniff(data)
+        if content_type is None:
+            raise HTTPException(415, "Please send a photo (JPG, PNG) or a PDF.")
+        pages.append((data, content_type))
+    try:
+        data, content_type = report_tests.merge(pages)
+    except report_tests.ReportError as e:
+        raise HTTPException(422, str(e)) from None
+    file_name = (files[0].filename or "report") if len(files) == 1 else f"report-{len(files)}-pages.pdf"
+    pid, actor, as_of = patient["id"], _actor(patient), today()
+    detail = f"{len(files)} page{'s' if len(files) > 1 else ''}; date recorded at upload"
+    if t is None:
+        doc_id = repo.create_document(conn, pid, "prescription", file_name, content_type, data, "patient_upload",
+                                      uploaded_by_patient_id=pid)
+        repo.audit(conn, actor, "DOCUMENT_UPLOADED", patient_id=pid, resource_type="document", resource_id=doc_id,
+                   detail=f"Prescription; {detail}")
+    elif t["route"] == "external":
+        report_id = repo.create_external_report(conn, pid, t["external_type"], as_of, file_name, content_type, data)
+        repo.audit(conn, actor, "EXTERNAL_REPORT_UPLOADED", patient_id=pid, resource_type="external_report",
+                   resource_id=report_id, detail=f"{t['short']} report; {detail}")
+    else:
+        label = name if t["key"] == "other" else t["short"]
+        doc_id = repo.create_document(conn, pid, "lab_report", file_name, content_type, data, "patient_upload",
+                                      description=label, uploaded_by_patient_id=pid)
+        repo.create_lab_report(conn, pid, "Uploaded by patient", as_of, "patient_upload", document_id=doc_id,
+                               report_type=label)
+        repo.audit(conn, actor, "DOCUMENT_UPLOADED", patient_id=pid, resource_type="document", resource_id=doc_id,
+                   detail=f"{label} report; {detail}")
+    conn.commit()
+    return {"message": "Sent. Your care team will check it.", "pages": len(files)}
 
 
 # ------------------------------------------------------------------ External Report Review: patient upload

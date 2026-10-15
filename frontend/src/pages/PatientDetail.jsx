@@ -4,6 +4,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import TestName from '../components/TestName.jsx'
 import { useClinician } from '../auth.jsx'
 import { api, daysBetween, formatAbha, formatDate, formatDateTime, formatTime, todayIso } from '../api.js'
 import LabResults from '../components/LabResults.jsx'
@@ -1217,7 +1218,7 @@ function ExternalReportsPanel({ reports }) {
             <tbody className="divide-y divide-line">
               {reports.map((x) => (
                 <tr key={x.id} className="hover:bg-subtle">
-                  <td className={td}>{x.test_label}</td>
+                  <td className={td}><TestName name={x.test_label} /></td>
                   <td className={`${td} whitespace-nowrap tnum`}>{formatDate(x.test_date)}</td>
                   <td className={`${td} whitespace-nowrap text-muted tnum`}>{formatDateTime(x.upload_date)}</td>
                   <td className={`${td} whitespace-nowrap font-medium tnum`}>
@@ -1416,7 +1417,7 @@ function LabReportItem({ report: r, patientId, onSaved }) {
     <li>
       <details open={entering || undefined}>
         <summary className="flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm hover:bg-subtle">
-          <span className="font-medium text-ink">{r.report_type ? cap(r.report_type) : r.laboratory_name}</span>
+          <span className="font-medium text-ink">{r.report_type ? <TestName name={r.report_type} fallback={cap(r.report_type)} /> : r.laboratory_name}</span>
           <span className="text-muted tnum">{formatDate(r.report_date)}</span>
           <span className="text-xs text-muted">{SOURCE_TEXT[r.source]}{r.report_type && r.source !== 'patient_upload' ? ` · ${r.laboratory_name}` : ''}</span>
           <span className="ml-auto flex items-center gap-2">

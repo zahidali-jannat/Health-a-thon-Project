@@ -4,3 +4,5 @@ pytest==9.1.1
 python-multipart==0.0.32
 uvicorn[standard]==0.53.0
 fhir.resources==8.3.0        # tests only: validates the FHIR view
+pillow==12.3.0               # Send report: photos of several pages become one PDF
+pypdf==6.20.1

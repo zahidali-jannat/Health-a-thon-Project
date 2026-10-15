@@ -1,0 +1,15 @@
+{
+  "_comment": "One list of report types for the patient app (Send report) and the clinical screens. short = shown everywhere; full and why = shown only on hover. route 'external' = one value, reviewed on the split screen (external_type is the stored test type); route 'lab' = a lab report whose values the team enters. Wording requires clinician sign-off.",
+  "prescription": {"short": "Prescription", "full": "Doctor's prescription", "why": "Shows the medicines you take now."},
+  "tests": [
+    {"key": "hba1c", "short": "HbA1c", "full": "Glycated haemoglobin (A1c)", "why": "Average blood sugar over the last 2–3 months.", "route": "external", "external_type": "HbA1c"},
+    {"key": "fpg", "short": "FPG", "full": "Fasting plasma glucose", "why": "Blood sugar after at least 8 hours without food.", "route": "external", "external_type": "Fasting Sugar"},
+    {"key": "ppbs", "short": "PPBS", "full": "Post-prandial blood sugar", "why": "Blood sugar 2 hours after a meal.", "route": "external", "external_type": "PP Sugar"},
+    {"key": "ogtt", "short": "OGTT", "full": "Oral glucose tolerance test", "why": "How the body handles sugar after a glucose drink.", "route": "lab"},
+    {"key": "kft", "short": "KFT", "full": "Kidney function test (creatinine, eGFR, urine albumin)", "why": "Diabetes can harm the kidneys; this finds it early.", "route": "lab"},
+    {"key": "lipid", "short": "Lipid", "full": "Lipid profile (cholesterol, LDL, HDL, triglycerides)", "why": "Checks heart risk, which diabetes raises.", "route": "lab"},
+    {"key": "eye_foot", "short": "Eye & foot", "full": "Diabetic eye (retina) and foot examination", "why": "Finds early eye and nerve damage from diabetes.", "route": "lab"},
+    {"key": "urine_ketone", "short": "Urine ketone", "full": "Urine ketone test", "why": "Ketones warn of very high sugar (risk of diabetic ketoacidosis).", "route": "lab"},
+    {"key": "other", "short": "Other", "full": "Another test", "why": "Any other test report. Write its name.", "route": "lab"}
+  ]
+}

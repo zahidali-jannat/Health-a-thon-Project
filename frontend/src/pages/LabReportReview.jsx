@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, formatDateTime } from '../api.js'
 import EnterResults from '../components/EnterResults.jsx'
 import { AppShell, Badge, btn, ErrorBox, Notice, td, th } from '../components/ui.jsx'
+import TestName from '../components/TestName.jsx'
 import { DocumentViewer } from './ReportReview.jsx'
 
 /*
@@ -53,7 +54,7 @@ export default function LabReportReview() {
   const doc = report?.document
   const status = doc?.review_status
   return (
-    <AppShell title={report ? `Lab report: ${report.report_type || 'report'}` : 'Lab report'}
+    <AppShell title={report?.report_type ? <><TestName name={report.report_type} /> report</> : 'Lab report'}
       subtitle={report && <>{report.patient_name} · <span className="tnum">{report.patient_code}</span></>}
       breadcrumbs={[{ label: 'Pending reports', to: '/care-team/reports' }, { label: report?.patient_name ?? '…' }]}>
       <ErrorBox>{error}</ErrorBox>

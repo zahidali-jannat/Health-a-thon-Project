@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, ExternalLink, Link2, XCircle } from 'lucid
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, formatDate, formatDateTime, todayIso } from '../api.js'
+import TestName from '../components/TestName.jsx'
 import { AppShell, btn, ErrorBox, input } from '../components/ui.jsx'
 
 /*
@@ -23,7 +24,7 @@ export default function ReportReview() {
 
   return (
     <AppShell
-      title={report ? `${report.test_label} report` : 'Report'}
+      title={report ? <><TestName name={report.test_label} /> report</> : 'Report'}
       subtitle={report && <>{report.patient_name} · <span className="tnum">{report.patient_code}</span></>}
       breadcrumbs={[{ label: 'Pending reports', to: '/care-team/reports' }, { label: report?.patient_name ?? '…' }]}>
       <ErrorBox>{error}</ErrorBox>
@@ -122,7 +123,7 @@ function ValueForm({ report: r, onDone }) {
       </header>
       <div className="px-4 pb-4">
         <dl className="divide-y divide-line">
-          <div className={row}><dt className="text-muted">Test type</dt><dd className="font-medium text-ink">{r.test_label}</dd></div>
+          <div className={row}><dt className="text-muted">Test</dt><dd className="font-medium text-ink"><TestName name={r.test_label} /></dd></div>
           {r.test_order_item_id && (
             <div className={row}><dt className="text-muted">Answers order</dt>
               <dd className="text-right text-ink">{r.order_test_name}<span className="block text-xs text-muted tnum">due {formatDate(r.order_due_by)}</span></dd></div>
@@ -135,7 +136,8 @@ function ValueForm({ report: r, onDone }) {
                 <input type="date" aria-label="Test date" value={testDate} max={todayIso()} onChange={(e) => setTestDate(e.target.value)}
                   className={`${input} w-40!`} />
               ) : (
-                <span className="font-medium text-ink tnum">{formatDate(r.test_date)}</span>
+                <span className="font-medium text-ink tnum">{formatDate(r.test_date)}
+                  {r.test_date === r.upload_date.slice(0, 10) && <span className="block text-xs font-normal text-warn-800">Upload day · check report</span>}</span>
               )}
               <button type="button" onClick={() => { setChangingDate((c) => !c); setTestDate(r.test_date); setErrors((x) => ({ ...x, date: null })) }}
                 className="mt-0.5 block w-full text-right text-xs text-brand-700 hover:underline">

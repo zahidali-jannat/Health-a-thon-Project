@@ -793,9 +793,12 @@ def _pending_items(conn, ids: list[str], who) -> list[dict]:
 
     # outside-lab test reports and medicine bills (split-screen review pages)
     for x in repo.pending_external_reports(conn, ids):
+        dated_at_upload = x["test_date"] == x["upload_date"][:10]     # Send report records the upload day
         items.append({**who(x["patient_id"]), "kind": "external", "id": x["id"], "at": x["upload_date"],
                       "label": f"{x['test_label']} report from an outside lab",
-                      "detail": f"Test on {fmt(date.fromisoformat(x['test_date']))}",
+                      "test": x["test_name"] if x["test_type"] == "Other" and x["test_name"] else x["test_type"],
+                      "detail": "Check the date on the report" if dated_at_upload
+                                else f"Test on {fmt(date.fromisoformat(x['test_date']))}",
                       "file": {"source": "external", "id": x["id"], "content_type": x["content_type"]}})
     for x in repo.pending_external_reports(conn, ids, "medicine_bill"):
         items.append({**who(x["patient_id"]), "kind": "bill", "id": x["id"], "at": x["upload_date"],
@@ -817,6 +820,7 @@ def _pending_items(conn, ids: list[str], who) -> list[dict]:
                   else "Values not entered yet" if t == "lab_report" and not r["has_values"] else None)
         items.append({**who(r["patient_id"]), "kind": "document", "id": r["id"], "at": r["uploaded_at"],
                       "document_type": t, "label": label, "detail": detail, "report_id": r["report_id"],
+                      "test": r["description"] if t == "lab_report" else "Prescription" if t == "prescription" else None,
                       "file": {"source": "document", "id": r["id"], "content_type": r["content_type"]}})
 
     # lab-report photos already confirmed whose values still have to be typed in
@@ -827,6 +831,7 @@ def _pending_items(conn, ids: list[str], who) -> list[dict]:
             f"AND NOT EXISTS (SELECT 1 FROM lab_test_results t WHERE t.report_id = r.id) AND r.patient_id IN ({marks})", ids):
         items.append({**who(r["patient_id"]), "kind": "results", "id": r["id"], "at": r["report_date"],
                       "label": f"Lab report: {r['report_type'] or 'report'}", "detail": "Confirmed · values not entered yet",
+                      "test": r["report_type"],
                       "file": {"source": "document", "id": r["document_id"], "content_type": r["content_type"]}})
 
     # readings typed in with no photo (sugar, "medicine not collected yet")

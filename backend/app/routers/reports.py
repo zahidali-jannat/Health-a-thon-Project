@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
-from .. import repo, storage
+from .. import report_tests, repo, storage
 from .. import report_links as rl
 from ..deps import current_clinician, get_conn, patient_for_clinician, read_upload, today
 
@@ -22,6 +22,13 @@ ReportType = Literal["egfr", "hemoglobin", "hba1c", "sugar", "other"]
 
 def _fail(e: Exception) -> HTTPException:
     return HTTPException(409 if "already linked" in str(e) else 422, str(e))
+
+
+@router.get("/report-tests")
+def report_test_list():
+    """The report types (short name, full name, why it is done) - the same list for patients and the care team.
+    No patient data, so no sign-in needed."""
+    return {**report_tests.catalog(), "aliases": report_tests.ALIASES}
 
 
 @router.get("/patients/{patient_id}/uploaded-reports")

@@ -270,10 +270,16 @@ const careTeamSidebar = (close) => <Sidebar onNavigate={close} />
  * `sidebar(close)` supplies the navigation; `large` is the patient app's bigger type scale.
  * A breadcrumb is a link (`to`), a button (`onClick`) or, for the current page, plain text.
  */
-export function AppShell({ title, subtitle, breadcrumbs = [], actions, meta, children, sidebar = careTeamSidebar, large = false }) {
+export function AppShell({ title, subtitle, breadcrumbs = [], actions, meta, children, sidebar = careTeamSidebar, large = false, bottomBar }) {
   const [drawer, setDrawer] = useState(false)
   const { pathname } = useLocation()
   useEffect(() => setDrawer(false), [pathname])
+  useEffect(() => {                                    // Escape closes the navigation drawer
+    if (!drawer) return undefined
+    const onKey = (e) => e.key === 'Escape' && setDrawer(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [drawer])
 
   return (
     <div className="min-h-screen lg:grid lg:grid-cols-[232px_1fr] print:block">
@@ -313,7 +319,7 @@ export function AppShell({ title, subtitle, breadcrumbs = [], actions, meta, chi
           {meta && <div className="hidden shrink-0 text-xs text-muted sm:block">{meta}</div>}
         </div>
 
-        <main className={`px-4 py-5 lg:px-6 ${large ? 'text-base' : ''}`}>
+        <main className={`px-4 py-5 lg:px-6 ${large ? 'text-base' : ''} ${bottomBar ? 'pb-24 lg:pb-5' : ''}`}>
           {(title || actions) && (
             <div className="mb-5 flex flex-wrap items-start justify-between gap-3 print:hidden">
               <div className="min-w-0">
@@ -326,6 +332,11 @@ export function AppShell({ title, subtitle, breadcrumbs = [], actions, meta, chi
           {children}
         </main>
       </div>
+      {bottomBar && (
+        <nav aria-label="Quick" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm lg:hidden print:hidden">
+          {bottomBar(() => setDrawer(true))}
+        </nav>
+      )}
     </div>
   )
 }
