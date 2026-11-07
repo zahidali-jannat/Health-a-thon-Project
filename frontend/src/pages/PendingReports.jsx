@@ -4,6 +4,7 @@ import TestName from '../components/TestName.jsx'
 import { Link, useLocation } from 'react-router-dom'
 import { api, formatDate, formatDateTime } from '../api.js'
 import DocumentPreview from '../components/DocumentPreview.jsx'
+import ExtractionPanel, { ReadStatus } from '../components/Extraction.jsx'
 import FilterMenu from '../components/FilterMenu.jsx'
 import { AppShell, btn, ErrorBox, Notice, td, th } from '../components/ui.jsx'
 
@@ -15,6 +16,7 @@ import { AppShell, btn, ErrorBox, Notice, td, th } from '../components/ui.jsx'
  */
 const GROUPS = [
   ['all', 'All'], ['test_report', 'Test reports'], ['medicine_bill', 'Medicine bills'], ['photo', 'Photos'], ['reading', 'Readings'],
+  ['request', 'Re-upload requests'],
 ]
 
 const fileUrl = (i, thumbnail = false) => (i.file.source === 'external'
@@ -57,9 +59,16 @@ export default function PendingReports() {
   }, [load])
 
   // decide a photo or a typed reading here; the list is then re-read from the server
-  const decide = async (item, status) => {
+  const decide = async (item, status, note) => {
     setError('')
     try {
+      if (item.kind === 'reupload') {                     // a patient asked to send a report again
+        if (status === 'confirmed') await api.acceptReuploadRequest(item.patient_id, item.id)
+        else await api.declineReuploadRequest(item.patient_id, item.id, note || null)
+        setNotice(`${status === 'confirmed' ? 'Accepted' : 'Declined'}: ${item.label} from ${item.patient_name}.`)
+        await load()
+        return
+      }
       if (item.kind === 'entry') await api.reviewEvent(item.patient_id, item.id, status)
       else await api.reviewDocument(item.patient_id, item.id, status)
       setNotice(`${status === 'confirmed' ? 'Confirmed' : 'Rejected'}: ${item.label} from ${item.patient_name}.`)
@@ -114,6 +123,7 @@ export default function PendingReports() {
                         <td className={td}>
                           <span className="font-medium"><ItemLabel item={i} /></span>
                           {i.detail && <span className="block text-xs text-muted">{i.detail}</span>}
+                          <ReadStatus p={i.processing} patientId={i.patient_id} onChanged={load} />
                         </td>
                         <td className={`${td} whitespace-nowrap text-muted tnum`}>{received(i)}</td>
                         <td className={`${td} text-right`}><Actions item={i} onDecide={decide} onView={() => setPreview(i)} /></td>
@@ -132,6 +142,7 @@ export default function PendingReports() {
                         <span className="block text-sm text-ink">{i.patient_name} <span className="text-muted tnum">· {i.patient_code}</span></span>
                         {i.detail && <span className="block text-xs text-muted">{i.detail}</span>}
                         <span className="block text-xs text-muted tnum">{received(i)}</span>
+                        <ReadStatus p={i.processing} patientId={i.patient_id} onChanged={load} />
                       </span>
                     </div>
                     <div className="mt-2"><Actions item={i} onDecide={decide} onView={() => setPreview(i)} /></div>
@@ -146,6 +157,9 @@ export default function PendingReports() {
       {preview && (
         <DocumentPreview patientId={preview.patient_id} url={fileUrl(preview)} title={`${preview.label} · ${preview.patient_name}`}
           report={{ id: preview.file.id, test_label: preview.label, upload_date: preview.at, content_type: preview.file.content_type }}
+          aside={preview.processing && preview.file.source === 'document' && (
+            <ExtractionPanel patientId={preview.patient_id} kind="document" sourceId={preview.file.id} mode="view"
+              onReupload={() => { setPreview(null); setNotice(`Asked ${preview.patient_name} to upload the right prescription.`); load() }} />)}
           onClose={() => setPreview(null)} />
       )}
     </AppShell>
@@ -167,6 +181,7 @@ function Actions({ item: i, onDecide, onView }) {
   if (i.kind === 'external') {
     return <Link to={`/care-team/reports/${i.patient_id}/${i.id}`} className={`${btn.primary} ${btn.sm}`}>Review</Link>
   }
+  if (i.kind === 'reupload') return <RequestActions item={i} onDecide={onDecide} onView={onView} />
   if (i.kind === 'bill') {
     return <Link to={`/care-team/bills/${i.patient_id}/${i.id}`} state={{ from: '/care-team/reports' }} className={`${btn.primary} ${btn.sm}`}>Review</Link>
   }
@@ -196,9 +211,43 @@ function Actions({ item: i, onDecide, onView }) {
   )
 }
 
+// A re-upload request: Accept (the old upload is set aside) or Decline with an optional note.
+function RequestActions({ item: i, onDecide, onView }) {
+  const [declining, setDeclining] = useState(false)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const go = async (status) => {
+    setBusy(true)
+    await onDecide(i, status, note.trim())
+    setBusy(false)
+  }
+  if (declining) {
+    return (
+      <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+        <input aria-label="Note for the patient (optional)" placeholder="Note (optional)" value={note} maxLength={200}
+          onChange={(e) => setNote(e.target.value)} className="h-8 w-44 rounded-md border border-line-strong bg-surface px-2 text-sm" />
+        <button type="button" disabled={busy} onClick={() => go('declined')} className={`${btn.danger} ${btn.sm}`}>Decline</button>
+        <button type="button" onClick={() => setDeclining(false)} className={`${btn.secondary} ${btn.sm}`}>Back</button>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
+      {i.file && <button type="button" onClick={onView} className={`${btn.ghost} ${btn.sm}`}>View</button>}
+      <button type="button" disabled={busy} onClick={() => go('confirmed')} className={`${btn.primary} ${btn.sm}`}>
+        <Check size={13} aria-hidden="true" /> Accept</button>
+      <button type="button" disabled={busy} onClick={() => setDeclining(true)} className={`${btn.secondary} ${btn.sm}`}>
+        <X size={13} aria-hidden="true" /> Decline</button>
+    </span>
+  )
+}
+
 // What was sent, by its short test name: "HbA1c report", "Lipid report", "Prescription".
 function ItemLabel({ item: i }) {
+  if (i.kind === 'reupload') {
+    return <>Re-upload request · {i.test === 'Prescription' ? 'Prescription' : <TestName name={i.test} />}</>
+  }
   if (!i.test) return i.label
   if (i.test === 'Prescription') return 'Prescription'
-  return <><TestName name={i.test} /> report</>
+  return <><TestName name={i.test} />{/\breport$/i.test(i.test) ? '' : ' report'}</>     // "Kidney report", not "… report report"
 }

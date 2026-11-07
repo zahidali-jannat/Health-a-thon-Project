@@ -131,6 +131,12 @@ def edit_value(event_id: int, body: ValueEdit, patient=Depends(patient_for_clini
         changes["effective_date"] = changes["effective_date"].isoformat()
     if not changes:
         raise HTTPException(422, "Nothing to change.")
+    if changes.get("unit"):
+        row = conn.execute("SELECT name FROM clinical_events WHERE id = ? AND patient_id = ?", (event_id, patient["id"])).fetchone()
+        try:
+            changes["unit"] = repo.required_unit(row["name"] if row else None, changes["unit"])     # HbA1c: % only
+        except repo.RepoError as e:
+            raise _fail(e) from None
     try:
         rl.edit_value(conn, patient["id"], event_id, changes, user, today())
     except repo.RepoError as e:

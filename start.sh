@@ -10,6 +10,9 @@ if [ ! -d backend/.venv ]; then
 fi
 [ -d frontend/node_modules ] || (cd frontend && npm install)
 
+# Local settings (API keys) from backend/.env - git-ignored, never committed.
+if [ -f backend/.env ]; then set -a; . backend/.env; set +a; fi
+
 # Your data is kept between runs. The schema is updated automatically at start-up.
 # Start completely fresh: (cd backend && .venv/bin/python -m app.reset)
 (cd backend && .venv/bin/uvicorn app.main:app --port 8000) &

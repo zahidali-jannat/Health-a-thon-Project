@@ -13,3 +13,7 @@ backend/uc2.db-*
 backend/uc2.before-*.db
 backend/*.db
 backend/*.db-*
+
+# local secrets (API keys) - never commit
+.env
+backend/.env

@@ -22,6 +22,9 @@ class Settings:
     site_url: str = ""             # public address, e.g. https://uc2.example.org - canonical links and the sitemap
     seed_demo: bool = False        # a public demo: load the demo fixtures when the database has no patients yet
     frontend_dist: Path | None = None   # the built website (frontend/dist), served by the API when it exists
+    sarvam_api_key: str | None = None   # OCR for scans and photos (Sarvam Vision); unset = those go to manual review
+    sarvam_language: str = "en-IN"
+    extraction_sweep: bool = True       # at start-up: read uploads not read yet, and mark interrupted ones failed
 
     @property
     def is_dev(self) -> bool:
@@ -41,4 +44,7 @@ def get_settings() -> Settings:
         site_url=os.environ.get("SITE_URL", "").rstrip("/"),
         seed_demo=os.environ.get("UC2_SEED_DEMO") == "1",
         frontend_dist=Path(os.environ.get("FRONTEND_DIST", BACKEND_DIR.parent / "frontend" / "dist")),
+        sarvam_api_key=os.environ.get("SARVAM_API_KEY") or None,
+        sarvam_language=os.environ.get("SARVAM_LANGUAGE", "en-IN"),
+        extraction_sweep=os.environ.get("UC2_EXTRACTION_SWEEP", "on") == "on",
     )

@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from ..extraction import pipeline
+from .. import reupload
 from .. import abdm_mock as abdm
 from .. import appointments as appt
 from .. import report_links as rl
@@ -235,8 +237,11 @@ def enter_report_results(report_id: str, body: ReportResultsIn, patient=Depends(
             numeric: float | str = float(value)
         except ValueError:
             numeric = value
-        rows.append((name, numeric, value, (r.unit or "").strip() or None,
-                     repo.parse_reference(r.reference, isinstance(numeric, float))))
+        try:
+            unit = repo.required_unit(name, (r.unit or "").strip() or None)          # HbA1c: % only
+        except repo.RepoError as e:
+            raise HTTPException(422, f"Row {i}: {e}") from None
+        rows.append((name, numeric, value, unit, repo.parse_reference(r.reference, isinstance(numeric, float))))
     when = body.report_date or date.fromisoformat(report["report_date"])
     if body.report_date:
         conn.execute("UPDATE lab_reports SET report_date = ? WHERE id = ? AND patient_id = ?",
@@ -245,6 +250,8 @@ def enter_report_results(report_id: str, body: ReportResultsIn, patient=Depends(
         repo.add_lab_result(conn, report_id, patient["id"], name, value, unit, when, value_text=as_typed, **ref)
     if report["document_id"] and report["document_status"] == "pending":
         repo.review_document(conn, patient["id"], report["document_id"], "confirmed", user["id"])
+    if report["document_id"]:
+        pipeline.decided_lab_results(conn, report["document_id"], user["id"], [(n, t, u) for n, _, t, u, _ in rows])
     repo.audit(conn, repo.clinician_actor(user), "REPORT_RESULTS_ENTERED", patient_id=patient["id"],
                resource_type="lab_report", resource_id=report_id, detail=f"{len(rows)} result(s)")
     conn.commit()
@@ -280,10 +287,81 @@ def review_document(document_id: str, body: ReviewIn, patient=Depends(patient_fo
                     user=Depends(current_clinician), conn=Depends(get_conn)):
     if not repo.review_document(conn, patient["id"], document_id, body.status, user["id"]):
         raise HTTPException(404, "Document not found.")
+    pipeline.decided_document(conn, document_id, user["id"], body.status)
     repo.audit(conn, repo.clinician_actor(user), f"DOCUMENT_{body.status.upper()}", patient_id=patient["id"],
                resource_type="document", resource_id=document_id)
     conn.commit()
     return {"ok": True}
+
+
+# ================================================================== automatic reading (CareCue Phase 1)
+# Values read from an upload are SUGGESTIONS for the team. These two routes show them and retry a failed read.
+
+@router.get("/patients/{patient_id}/extraction/{kind}/{source_id}")
+def extraction(kind: Literal["document", "external_report"], source_id: str, patient=Depends(patient_for_clinician),
+               conn=Depends(get_conn)):
+    v = pipeline.view(conn, kind, source_id, patient["id"])
+    if v is None:
+        raise HTTPException(404, "This upload is not read automatically.")
+    return v
+
+
+class DeclineIn(BaseModel):
+    note: str | None = Field(None, max_length=200)
+
+
+@router.post("/patients/{patient_id}/reupload-requests/{request_id}/accept")
+def accept_reupload(request_id: int, patient=Depends(patient_for_clinician), user=Depends(current_clinician), conn=Depends(get_conn)):
+    """The patient asked to send a report again: the old upload is set aside and they may send it again."""
+    try:
+        q = reupload.accept(conn, request_id, patient["id"], user)
+    except reupload.RequestError as e:
+        conn.rollback()
+        raise HTTPException(e.status, str(e)) from None
+    conn.commit()
+    return q
+
+
+@router.post("/patients/{patient_id}/reupload-requests/{request_id}/decline")
+def decline_reupload(request_id: int, body: DeclineIn, patient=Depends(patient_for_clinician), user=Depends(current_clinician),
+                     conn=Depends(get_conn)):
+    try:
+        q = reupload.decline(conn, request_id, patient["id"], user, body.note)
+    except reupload.RequestError as e:
+        raise HTTPException(e.status, str(e)) from None
+    conn.commit()
+    return q
+
+
+@router.post("/patients/{patient_id}/extraction/{processing_id}/request-reupload")
+def request_reupload(processing_id: str, patient=Depends(patient_for_clinician), user=Depends(current_clinician),
+                     conn=Depends(get_conn)):
+    """Checked by the team: the wrong report. It is rejected and the patient is asked to upload the right one."""
+    row = conn.execute("SELECT status FROM document_processing WHERE id = ? AND patient_id = ?",
+                       (processing_id, patient["id"])).fetchone()
+    if row is None:
+        raise HTTPException(404, "Not found.")
+    if row["status"] in pipeline.DECIDED:
+        raise HTTPException(409, "This upload was already decided.")
+    out = pipeline.request_reupload(conn, processing_id, patient["id"], user)
+    conn.commit()
+    return out
+
+
+@router.post("/patients/{patient_id}/extraction/{processing_id}/retry")
+def retry_extraction(processing_id: str, patient=Depends(patient_for_clinician), user=Depends(current_clinician),
+                     conn=Depends(get_conn)):
+    row = conn.execute("SELECT source_kind, source_id, status FROM document_processing WHERE id = ? AND patient_id = ?",
+                       (processing_id, patient["id"])).fetchone()
+    if row is None:
+        raise HTTPException(404, "Not found.")
+    if row["status"] not in ("failed", "needs_review", "extraction_completed"):
+        raise HTTPException(409, "This upload can't be read again now.")
+    repo.audit(conn, repo.clinician_actor(user), "EXTRACTION_RETRIED", patient_id=patient["id"],
+               resource_type="document_processing", resource_id=processing_id)
+    conn.commit()
+    pipeline.process(processing_id)                      # now, while the team waits
+    return pipeline.view(conn, row["source_kind"], row["source_id"], patient["id"])
 
 
 # ================================================================== External Report Review (clinician side)
@@ -369,6 +447,7 @@ def save_external_value(report_id: str, body: ExternalValueIn, patient=Depends(p
     try:
         repo.save_reviewed_value(conn, patient["id"], report_id, body.value, user, unit=unit, test_date=body.test_date)
         test_orders.on_report_verified(conn, patient["id"], report_id, user)        # the order it answers, if any
+        pipeline.decided_external(conn, report_id, user["id"], body.value, unit or x["expected_unit"], x["test_type"])
         corrected = body.test_date and body.test_date.isoformat() != x["test_date"]
         repo.audit(conn, repo.clinician_actor(user), "EXTERNAL_REPORT_REVIEWED", patient_id=patient["id"],
                    resource_type="external_report", resource_id=report_id,
@@ -399,6 +478,7 @@ def reject_external_report(report_id: str, body: ExternalRejectIn, patient=Depen
     if not repo.reject_external_report(conn, patient["id"], report_id, user["id"], reason):
         raise HTTPException(409, "This report has already been reviewed.")
     test_orders.on_report_rejected(conn, patient["id"], report_id, user, reason)   # back to waiting; the patient is told
+    pipeline.rejected(conn, "external_report", report_id, user["id"])
     repo.audit(conn, repo.clinician_actor(user), "EXTERNAL_REPORT_REJECTED", patient_id=patient["id"],
                resource_type="external_report", resource_id=report_id, detail=reason)
     conn.commit()
@@ -782,7 +862,8 @@ def simulate_expiry(consent_id: int, patient=Depends(patient_for_clinician), con
 # Everything a patient sent from the app that still needs a decision: outside-lab test reports, medicine bills,
 # photos (prescriptions, lab reports, meter photos) and typed readings. The Overview uses the same list.
 
-GROUP_OF_KIND = {"external": "test_report", "results": "photo", "bill": "medicine_bill", "document": "photo", "entry": "reading"}
+GROUP_OF_KIND = {"external": "test_report", "results": "photo", "bill": "medicine_bill", "document": "photo", "entry": "reading",
+                 "reupload": "request"}
 
 
 def _pending_items(conn, ids: list[str], who) -> list[dict]:
@@ -797,7 +878,7 @@ def _pending_items(conn, ids: list[str], who) -> list[dict]:
         items.append({**who(x["patient_id"]), "kind": "external", "id": x["id"], "at": x["upload_date"],
                       "label": f"{x['test_label']} report from an outside lab",
                       "test": x["test_name"] if x["test_type"] == "Other" and x["test_name"] else x["test_type"],
-                      "detail": "Check the date on the report" if dated_at_upload
+                      "detail": "Upload-day date" if dated_at_upload
                                 else f"Test on {fmt(date.fromisoformat(x['test_date']))}",
                       "file": {"source": "external", "id": x["id"], "content_type": x["content_type"]}})
     for x in repo.pending_external_reports(conn, ids, "medicine_bill"):
@@ -847,8 +928,26 @@ def _pending_items(conn, ids: list[str], who) -> list[dict]:
         items.append({**who(r["patient_id"]), "kind": "entry", "id": r["id"], "at": r["created_at"],
                       "reading_date": r["effective_date"], "label": label, "detail": detail, "file": None})
 
+    # a patient asks to send a report again (the one still being checked)
+    for q in reupload.open_for(conn, ids):
+        if q["source_kind"] == "external_report":
+            f = conn.execute("SELECT content_type FROM external_reports WHERE id = ?", (q["source_id"],)).fetchone()
+            file = {"source": "external", "id": q["source_id"], "content_type": f[0]} if f else None
+        else:
+            f = conn.execute("SELECT content_type FROM patient_documents WHERE id = ?", (q["source_id"],)).fetchone()
+            file = {"source": "document", "id": q["source_id"], "content_type": f[0]} if f else None
+        items.append({**who(q["patient_id"]), "kind": "reupload", "id": q["id"], "at": q["requested_at"],
+                      "label": f"Re-upload request · {q['label']}", "test": "Prescription" if q["test_key"] == "prescription" else q["label"],
+                      "detail": q["reason"], "file": file})
+
+    # how the automatic reading went, for each uploaded file (CareCue Phase 1)
+    ext = pipeline.summary(conn, "external_report", [i["id"] for i in items if i["kind"] == "external"])
+    docs = pipeline.summary(conn, "document", [i["file"]["id"] for i in items
+                                               if i["kind"] in ("document", "results") and i.get("file")])
     for it in items:
         it["group"] = GROUP_OF_KIND[it["kind"]]
+        it["processing"] = ext.get(it["id"]) if it["kind"] == "external" else \
+            docs.get(it["file"]["id"]) if it["kind"] in ("document", "results") and it.get("file") else None
     items.sort(key=lambda it: it["at"])                  # oldest first: the longest wait at the top
     return items
 

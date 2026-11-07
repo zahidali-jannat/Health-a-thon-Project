@@ -385,6 +385,10 @@ def create_document(conn, patient_id: str, document_type: str, file_name: str, c
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (doc_id, patient_id, document_type, description, (file_name or "upload")[:200], content_type, len(data),
              hashlib.sha256(data).hexdigest(), key, source, uploaded_by_patient_id, uploaded_by_user_id, now_iso()))
+        if source == "patient_upload" and document_type in ("lab_report", "prescription"):
+            from .extraction import pipeline           # read automatically; the team still decides
+            pipeline.register(conn, patient_id, "document", doc_id, document_type, hashlib.sha256(data).hexdigest(),
+                              content_type, pipeline.expected_key(description) if document_type == "lab_report" else None)
     except Exception:
         storage.delete(key)
         raise
@@ -563,6 +567,20 @@ EXTERNAL_TESTS = {   # test type -> (name used on graphs, unit, lowest and highe
 }
 
 
+FIXED_UNITS = {"hba1c": "%"}             # tests that are only ever recorded in one unit (HbA1c: % only)
+
+
+def required_unit(test_name: str | None, unit: str | None) -> str | None:
+    """HbA1c is recorded in % only. No unit given -> %; any other unit is refused (it would be a second, wrong series)."""
+    from .extraction.validate import analyte_of
+    want = FIXED_UNITS.get(analyte_of(test_name or "") or "")
+    if want is None:
+        return unit
+    if unit and unit.strip() and unit.strip() != want:
+        raise RepoError(f"{test_name.strip()} is entered in {want} only.")
+    return want
+
+
 def external_test_label(test_type: str, test_name: str | None) -> str:
     return test_name if test_type == "Other" and test_name else test_type
 
@@ -584,6 +602,10 @@ def create_external_report(conn, patient_id: str, test_type: str, test_date: dat
             (report_id, patient_id, patient_id, now_iso(), test_type, test_name if test_type == "Other" else None,
              test_date.isoformat(), (file_name or "report")[:200], content_type, len(data),
              hashlib.sha256(data).hexdigest(), key, test_order_item_id, lab_name))
+        from . import report_tests
+        from .extraction import pipeline                # read automatically; the team still decides
+        pipeline.register(conn, patient_id, "external_report", report_id, "lab_report", hashlib.sha256(data).hexdigest(),
+                          content_type, report_tests.ALIASES.get(test_type))
     except Exception:
         storage.delete(key)
         raise

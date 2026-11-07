@@ -9,7 +9,8 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .. import abdm_mock as abdm
-from .. import report_tests, repo, storage
+from .. import report_tests, repo, reupload, storage
+from ..extraction import pipeline
 from ..config import DEFAULT_CONFIG
 from ..deps import current_patient, get_conn, now, read_upload, today
 from ..detection import fmt
@@ -152,6 +153,7 @@ async def upload_document(kind: Literal["prescription", "lab_report"] = Form(...
     repo.audit(conn, _actor(patient), "DOCUMENT_UPLOADED", patient_id=patient["id"], resource_type="document",
                resource_id=doc_id)
     conn.commit()
+    pipeline.wake()
     label = "prescription" if kind == "prescription" else f"lab report ({description})"
     return {"id": doc_id, "message": f"Thank you. Your {label} was sent to your care team."}
 
@@ -163,6 +165,7 @@ async def upload_document(kind: Literal["prescription", "lab_report"] = Form(...
 @router.post("/reports")
 async def send_report(kind: Literal["prescription", "lab_report"] = Form(...), test: str | None = Form(None),
                       test_name: str | None = Form(None, max_length=80), files: list[UploadFile] = File(...),
+                      confirm_mismatch: bool = Form(False),
                       patient=Depends(current_patient), conn=Depends(get_conn)):
     t, name = None, (test_name or "").strip()
     if kind == "lab_report":
@@ -171,6 +174,12 @@ async def send_report(kind: Literal["prescription", "lab_report"] = Form(...), t
             raise HTTPException(422, "Please choose the test.")
         if t["key"] == "other" and len(name) < 2:
             raise HTTPException(422, "Please write the test name.")
+    same = reupload.same_waiting(conn, patient["id"], kind, t and t["key"], name)
+    if same:                                            # already sent and still being checked: ask, don't resend
+        what = "Prescription" if same["test_key"] == "prescription" else f"{same['label']} report"
+        raise HTTPException(409, {"code": "already_sent", "message": f"{what} already sent · Checking",
+                                  "source_kind": same["source_kind"], "source_id": same["source_id"],
+                                  "requested": same["requested"]})
     pages = []
     for f in files:
         data = await read_upload(f)
@@ -182,6 +191,21 @@ async def send_report(kind: Literal["prescription", "lab_report"] = Form(...), t
         data, content_type = report_tests.merge(pages)
     except report_tests.ReportError as e:
         raise HTTPException(422, str(e)) from None
+    # Read it now and check it is the report the patient says it is. A clear mismatch is sent back to the patient
+    # (choose again, or send anyway - the clinical team then checks it). Unreadable or unsure: it just goes to the team.
+    read, override = None, None
+    try:
+        read = pipeline.read_text(data, content_type)
+    except Exception:                                   # noqa: BLE001 - OCR down: the background reader retries later
+        read = None
+    if read and not read["reason"]:
+        from ..extraction import match
+        m = match.check(t["key"] if t else None, kind, [p["text"] for p in read["pages"]])
+        if m.result == "mismatch":
+            if not confirm_mismatch:
+                raise HTTPException(409, {"code": "test_mismatch", "found": m.found,
+                                          "message": pipeline.mismatch_message(t["key"] if t else None, kind, m.found)})
+            override = "test_mismatch"
     file_name = (files[0].filename or "report") if len(files) == 1 else f"report-{len(files)}-pages.pdf"
     pid, actor, as_of = patient["id"], _actor(patient), today()
     detail = f"{len(files)} page{'s' if len(files) > 1 else ''}; date recorded at upload"
@@ -202,8 +226,42 @@ async def send_report(kind: Literal["prescription", "lab_report"] = Form(...), t
                                report_type=label)
         repo.audit(conn, actor, "DOCUMENT_UPLOADED", patient_id=pid, resource_type="document", resource_id=doc_id,
                    detail=f"{label} report; {detail}")
+    if read is not None:                               # already read: store it now, no second read in the background
+        source = ("document", doc_id) if t is None or t["route"] != "external" else ("external_report", report_id)
+        conn.execute("SAVEPOINT store_read")
+        try:
+            pipeline.store_now(conn, *source, read, override)
+            conn.execute("RELEASE store_read")
+        except Exception:                               # noqa: BLE001 - never lose the upload over its reading:
+            conn.execute("ROLLBACK TO store_read")      # it stays 'uploaded' and the background reader tries again
+            conn.execute("RELEASE store_read")
     conn.commit()
+    pipeline.wake()
     return {"message": "Sent. Your care team will check it.", "pages": len(files)}
+
+
+# ------------------------------------------------------------------ re-upload requests (the patient asks; the team decides)
+
+class ReuploadIn(BaseModel):
+    source_kind: Literal["document", "external_report"]
+    source_id: str = Field(max_length=64)
+    reason: str | None = Field(None, max_length=200)
+
+
+@router.get("/reupload-requests")
+def my_reupload_requests(patient=Depends(current_patient), conn=Depends(get_conn)):
+    """Reports still being checked (the ones that can be asked for), and the patient's requests with their answers."""
+    return {"waiting": reupload.waiting_uploads(conn, patient["id"]), "requests": reupload.for_patient(conn, patient["id"])}
+
+
+@router.post("/reupload-requests", status_code=201)
+def ask_to_reupload(body: ReuploadIn, patient=Depends(current_patient), conn=Depends(get_conn)):
+    try:
+        q = reupload.create(conn, patient, body.source_kind, body.source_id, body.reason)
+    except reupload.RequestError as e:
+        raise HTTPException(e.status, str(e)) from None
+    conn.commit()
+    return q
 
 
 # ------------------------------------------------------------------ External Report Review: patient upload
@@ -241,6 +299,7 @@ async def upload_external_report(test_type: Literal["HbA1c", "Fasting Sugar", "P
                resource_type="external_report", resource_id=report_id,
                detail=f"{repo.external_test_label(test_type, test_name)} test on {fmt(test_date)}")
     conn.commit()
+    pipeline.wake()
     return {"id": report_id, "message": "Report uploaded. Your care team will review it shortly."}
 
 

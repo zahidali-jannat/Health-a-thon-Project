@@ -1,0 +1,43 @@
+{
+  "_comment": "Rules for reading values from uploaded reports. Every threshold here requires clinician sign-off. Names are regular expressions (case-insensitive) checked in order - put the more specific test first. units: accepted units -> how to reach the standard unit ({factor, offset}: standard = value * factor + offset). plausible: the range a real result falls in, in the standard unit; outside it the value is flagged, never changed.",
+  "analytes": [
+    {"key": "hba1c", "label": "HbA1c", "names": ["\\bhb\\s*-?\\s*a1c\\b", "\\bglyc(at|osyl)ated\\s+ha?emoglobin\\b", "\\ba1c\\b"],
+     "standard_unit": "%", "units": {"%": {"factor": 1}, "mmol/mol": {"factor": 0.09148, "offset": 2.152}}, "plausible": [3, 20]},
+    {"key": "fpg", "label": "Fasting glucose", "names": ["\\bfasting\\s+(plasma\\s+|blood\\s+)?(glucose|sugar)\\b", "\\bglucose\\s*[,(-]?\\s*fasting\\b", "\\bf\\.?\\s?b\\.?\\s?s\\b", "\\bfpg\\b", "\\bfbg\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 18.016}}, "plausible": [20, 600]},
+    {"key": "ppbs", "label": "Post-meal glucose (PP)", "names": ["\\bpost\\s*-?\\s*prandial\\s+(plasma\\s+|blood\\s+)?(glucose|sugar)\\b", "\\bglucose\\s*[,(-]?\\s*(pp|post\\s*-?\\s*prandial)\\b", "\\bpp\\s*b\\s*[sg]\\b", "\\bpp\\s+(blood\\s+)?(glucose|sugar)\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 18.016}}, "plausible": [20, 800]},
+    {"key": "rbs", "label": "Random glucose", "names": ["\\brandom\\s+(plasma\\s+|blood\\s+)?(glucose|sugar)\\b", "\\bglucose\\s*[,(-]?\\s*random\\b", "\\brbs\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 18.016}}, "plausible": [20, 800]},
+    {"key": "ogtt", "label": "OGTT glucose", "names": ["\\bogtt\\b", "\\bglucose\\s+tolerance\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 18.016}}, "plausible": [20, 800]},
+    {"key": "uacr", "label": "Urine albumin/creatinine ratio", "names": ["\\buacr\\b", "\\balbumin\\s*[/:-]?\\s*creatinine\\s+ratio\\b", "\\bmicro\\s*-?\\s*albumin\\b"],
+     "standard_unit": "mg/g", "units": {"mg/g": {"factor": 1}, "mg/mmol": {"factor": 8.84}}, "plausible": [0, 5000]},
+    {"key": "egfr", "label": "eGFR", "names": ["\\be\\s*-?\\s*gfr\\b", "\\bestimated\\s+glomerular\\b"],
+     "standard_unit": "mL/min/1.73m²", "units": {"mL/min/1.73m²": {"factor": 1}, "mL/min": {"factor": 1}}, "plausible": [1, 200]},
+    {"key": "creatinine", "label": "Creatinine", "names": ["\\b(serum\\s+)?creatinine\\b"], "exclude": ["albumin", "ratio", "clearance"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "µmol/L": {"factor": 0.01131}}, "plausible": [0.1, 20]},
+    {"key": "vldl", "label": "VLDL cholesterol", "names": ["\\bvldl\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 38.67}}, "plausible": [1, 200]},
+    {"key": "ldl", "label": "LDL cholesterol", "names": ["\\bldl\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 38.67}}, "plausible": [10, 400]},
+    {"key": "hdl", "label": "HDL cholesterol", "names": ["\\bhdl\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 38.67}}, "plausible": [5, 150]},
+    {"key": "triglycerides", "label": "Triglycerides", "names": ["\\btriglycerides?\\b", "\\btg\\b"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 88.57}}, "plausible": [20, 5000]},
+    {"key": "total_cholesterol", "label": "Total cholesterol", "names": ["\\btotal\\s+cholesterol\\b", "\\bcholesterol\\s*[,(-]?\\s*total\\b", "\\bs\\.?\\s*cholesterol\\b", "\\bcholesterol\\b"], "exclude": ["ldl", "hdl", "vldl", "ratio"],
+     "standard_unit": "mg/dL", "units": {"mg/dL": {"factor": 1}, "mmol/L": {"factor": 38.67}}, "plausible": [50, 600]},
+    {"key": "hemoglobin", "label": "Hemoglobin", "names": ["\\bha?emoglobin\\b", "\\bhb\\b"], "exclude": ["a1c", "glyc"],
+     "standard_unit": "g/dL", "units": {"g/dL": {"factor": 1}, "g/L": {"factor": 0.1}}, "plausible": [3, 25]},
+    {"key": "urine_ketone", "label": "Urine ketones", "names": ["\\bketones?\\b", "\\bketone\\s+bodies\\b"], "qualitative": true}
+  ],
+  "unit_spellings": {
+    "%": ["%", "percent"], "mmol/mol": ["mmol/mol"], "mg/dL": ["mg/dl", "mg/100ml", "mg %", "mg%"], "mmol/L": ["mmol/l"],
+    "g/dL": ["g/dl", "gm/dl", "gms/dl", "gm%"], "g/L": ["g/l"], "µmol/L": ["µmol/l", "umol/l", "μmol/l"],
+    "mg/g": ["mg/g", "mg/gm", "µg/mg", "ug/mg"], "mg/mmol": ["mg/mmol"],
+    "mL/min/1.73m²": ["ml/min/1.73\\s*m(2|²|\\^2|sq)", "ml/min/1.73"], "mL/min": ["ml/min"]
+  },
+  "qualitative_values": ["negative", "nil", "absent", "not detected", "trace", "small", "moderate", "large", "positive", "\\+{1,4}", "[1-4]\\s*\\+"],
+  "dates": {"not_older_than_years": 5},
+  "quality": {"min_text_chars_per_page": 25, "min_image_side_px": 500, "blur_edge_variance": 60, "min_readable_word_share": 0.45, "max_pages": 30}
+}

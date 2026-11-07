@@ -80,10 +80,10 @@ def test_other_tests_become_lab_reports_and_several_pages_become_one_pdf(make_cl
 def test_prescription_and_the_real_file_type(make_client):
     c = make_client()
     login_patient(c, "P-1001")
-    assert send(c, [("rx.png", _png(), "image/png")], kind="prescription").status_code == 200
     fake = send(c, [("rx.pdf", b"not really a pdf", "application/pdf")], kind="prescription")
     assert fake.status_code == 415                                   # the bytes decide, not the name
     too_many = send(c, [("p.pdf", PDF, "application/pdf")] * 11, kind="prescription")
     assert too_many.status_code == 422
+    assert send(c, [("rx.png", _png(), "image/png")], kind="prescription").status_code == 200
     stranger = make_client()
     assert send(stranger, [("rx.png", _png(), "image/png")], kind="prescription").status_code == 401

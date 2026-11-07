@@ -99,7 +99,14 @@ export const api = {
   upload: (kind, file, description) => postForm('/me/documents', { kind, description, file }),
   reportTests: () => request('/report-tests'),
   // Send report: prescription or a lab report of a chosen test; several pages arrive as one file
-  sendReport: ({ kind, test, testName, files }, onProgress) => sendFiles('/me/reports', { kind, test, test_name: testName }, files, onProgress),
+  sendReport: ({ kind, test, testName, files, confirmMismatch }, onProgress) =>
+    sendFiles('/me/reports', { kind, test, test_name: testName, confirm_mismatch: confirmMismatch ? 'true' : null }, files, onProgress),
+  requestReupload: (patientId, processingId) => postJson(`/patients/${patientId}/extraction/${processingId}/request-reupload`),
+  // re-upload requests: the patient asks, the clinical team accepts or declines
+  myReuploadRequests: () => request('/me/reupload-requests'),
+  askReupload: (body) => postJson('/me/reupload-requests', body),
+  acceptReuploadRequest: (patientId, id) => postJson(`/patients/${patientId}/reupload-requests/${id}/accept`),
+  declineReuploadRequest: (patientId, id, note) => postJson(`/patients/${patientId}/reupload-requests/${id}/decline`, { note }),
   myDocuments: () => request('/me/documents'),
   myDocumentUrl: (docId) => `/api/me/documents/${docId}/file`,
   giveAge: (age) => postJson('/me/age', { age }),
@@ -122,6 +129,9 @@ export const api = {
   // External Report Review - care team
   pendingReports: () => request('/external-reports/pending'),
   pendingItems: () => request('/pending-items'),        // Pending reports: everything waiting, one inbox
+  // CareCue Phase 1: what the automatic reading suggested for an upload, and reading it again
+  extraction: (patientId, kind, sourceId) => request(`/patients/${patientId}/extraction/${kind}/${sourceId}`),
+  retryExtraction: (patientId, processingId) => postJson(`/patients/${patientId}/extraction/${processingId}/retry`),
   externalReports: (patientId) => request(`/patients/${patientId}/external-reports`),
   externalReport: (patientId, reportId) => request(`/patients/${patientId}/external-reports/${reportId}`),
   externalReportUrl: (patientId, reportId, thumbnail = false) =>
@@ -227,6 +237,7 @@ function uploadWithProgress(path, fields, onProgress, headers = {}, files = []) 
         : (d && typeof d === 'object' ? d.message : d) || 'The upload failed. Please try again.')
       err.status = xhr.status
       err.code = d?.code
+      err.data = d && typeof d === 'object' && !Array.isArray(d) ? d : null
       reject(err)
     }
     xhr.onerror = () => reject(new Error('Cannot reach the server. Please check your connection and try again.'))

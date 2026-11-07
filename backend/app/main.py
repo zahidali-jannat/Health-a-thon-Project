@@ -48,6 +48,11 @@ async def lifespan(_app: FastAPI):
         seed_database(conn, date.today(), brief_demo=True)
         log.info("public demo: loaded the demo fixtures")
     conn.close()
+    if get_settings().extraction_sweep:                # read uploaded reports in the background (CareCue Phase 1)
+        from .extraction import pipeline
+        pipeline.recover_interrupted()
+        pipeline.backfill()
+        pipeline.start_worker()
     task = asyncio.create_task(_reminder_loop()) if get_settings().reminders else None
     yield
     if task:

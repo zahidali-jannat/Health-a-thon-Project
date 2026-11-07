@@ -518,6 +518,50 @@ both is `demo1234`.
 
 ---
 
+## Automatic reading of uploaded reports (CareCue Phase 1)
+
+Every report or prescription a patient sends is read automatically. What it finds is a **suggestion** for the
+clinical team, never a clinical record. A value reaches the record only through the team's own save (the split
+screen, or "Enter the values"). Each suggestion is then marked **verified**, **corrected** (with the value the team
+saved) or **rejected** (not used).
+
+| Stage | What happens |
+|---|---|
+| 1. Ingest | Type checked from the file's bytes. Pages are merged into one file. One `document_processing` row per upload. Exact repeats are found by SHA-256. |
+| 2. Text | PDF text layer read on this server (`pypdf`). Scans and photos go to **Sarvam Vision OCR**, but only when `SARVAM_API_KEY` is set. Page numbers are kept. |
+| 3. Values | Line by line, from `config/extraction_rules.json`. Each value keeps its unit, reference range, date, lab name, page, **the exact line it came from**, method and confidence. Medicines and allergies are read only from printed lines. Nothing is invented. |
+| 4. Checks | Deterministic, with no AI. Missing or unexpected unit, implausible value, unit conversion, test date, repeats and conflicts. Details below. |
+| 5. Saved | `extracted_fields` + `validation_issues`. A trigger keeps the status moving forward. A person's decision is final. |
+
+**Stage 4 checks in detail:**
+- A missing or unexpected unit is flagged.
+- An implausible value is flagged, never changed.
+- A unit conversion is added beside the printed value, with its factor. The printed value is always kept.
+- The test date is checked: missing, ambiguous (03/04), in the future, or too old.
+- Repeats are found: the same file sent twice, or the same value already on record.
+- Conflicts are reported, never merged: a different value on the same day, or a test printed twice with different values.
+
+**Statuses:** `uploaded → processing → extraction_completed | needs_review | failed → verified | corrected | rejected`.
+
+**Handwritten or unclear documents** (mostly fragments after reading) get **no suggestions at all**. They are marked
+"Handwritten or unclear - clinical team verification required", and the team reads them itself.
+
+**Without `SARVAM_API_KEY`:** text PDFs are still read on this server. Photos and scans go straight to the team
+("read it yourself").
+
+**Privacy:** when the key is set, scans and photos of reports are sent to Sarvam's API. Set it for real patients only
+once the clinic accepts Sarvam's data terms. The key lives in the environment, never in the code.
+
+**On the clinic side:**
+- **Pending reports:** a reading status under each upload. A failed read has a **Retry** button.
+- **Review screens:** a "Read from the report" panel. Use **Use** on a one-value report, or **Use these values** on a
+  lab report, to copy suggestions into the form.
+- **Prescription preview:** shows the medicines read from it.
+
+**After an upgrade:** at start-up, uploads still waiting for the team are read too.
+
+---
+
 ## Doctors and the clinic team: two dashboards
 
 Every clinic account is either a **doctor** or the **clinic team**. The clinic's name is stored in

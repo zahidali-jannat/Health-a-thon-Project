@@ -280,6 +280,8 @@ async def upload_test_report(item_id: str, file: UploadFile = File(...), test_da
                                                   content_type=kind, data=data, today=today(), idem=idem)
     except orders.OrderError as e:
         return _fail(e)
+    from ..extraction import pipeline
+    pipeline.wake()                                       # read the new report in the background
     return JSONResponse(response, status_code=status)
 
 

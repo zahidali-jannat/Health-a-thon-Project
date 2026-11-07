@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, formatDateTime } from '../api.js'
 import EnterResults from '../components/EnterResults.jsx'
+import ExtractionPanel from '../components/Extraction.jsx'
 import { AppShell, Badge, btn, ErrorBox, Notice, td, th } from '../components/ui.jsx'
 import TestName from '../components/TestName.jsx'
 import { DocumentViewer } from './ReportReview.jsx'
@@ -24,6 +25,7 @@ export default function LabReportReview() {
   const [rejecting, setRejecting] = useState(false)
   const [busy, setBusy] = useState(false)
   const [formKey, setFormKey] = useState(0)
+  const [prefill, setPrefill] = useState(null)          // suggestions copied into the form ("Use these values")
 
   const load = useCallback(() => api.labReport(patientId, reportId).then(setReport).catch((e) => setError(e.message)), [patientId, reportId])
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function LabReportReview() {
                 <span>
                   <span className="block text-base font-semibold text-ink">Approval</span>
                   <span className="block text-sm text-muted">
-                    {status === 'pending' ? 'Confirm the report is genuine and readable, or reject it' : status === 'confirmed' ? 'Confirmed' : 'Rejected'}
+                    {status === 'pending' ? 'Pending' : status === 'confirmed' ? 'Confirmed' : 'Rejected'}
                   </span>
                 </span>
                 <ChevronDown size={18} aria-hidden="true" className={`shrink-0 text-muted ${approvalOpen ? 'rotate-180' : ''}`} />
@@ -117,11 +119,23 @@ export default function LabReportReview() {
               )}
             </section>
 
+            <ExtractionPanel patientId={patientId} kind="document" sourceId={doc.id} mode="lab"
+              decided={status === 'rejected' || report.results.length > 0}
+              onReupload={() => backToInbox(`Asked ${report.patient_name} to upload the right report.`)}
+              onUse={(fields) => {
+                setPrefill({
+                  date: fields.find((f) => f.observed_on)?.observed_on,
+                  rows: fields.map((f) => (f.analyte === 'hba1c' && f.normalized_unit === '%'      // HbA1c: % only
+                    ? { test_name: f.label ?? f.name, value: String(f.normalized_value), unit: '%', reference: '' }
+                    : { test_name: f.label ?? f.name, value: f.value_text ?? '', unit: f.unit ?? '', reference: f.reference_range ?? '' })),
+                })
+                setFormKey((k) => k + 1)
+              }} />
+
             {/* Enter the values of this lab report */}
             <section className="rounded-lg border border-line bg-surface" aria-label="Values of this lab report">
               <header className="border-b border-line px-4 py-3">
-                <h2 className="text-base font-semibold text-ink">Enter the values of this lab report</h2>
-                <p className="text-sm text-muted">Exactly as printed. Saving them also confirms the report.</p>
+                <h2 className="text-base font-semibold text-ink">Values</h2>
               </header>
               <div className="px-4 py-3">
                 {status === 'rejected' ? (
@@ -145,6 +159,7 @@ export default function LabReportReview() {
                       </table>
                     )}
                     <EnterResults key={formKey} report={report} patientId={patientId}
+                      initialRows={prefill?.rows} initialDate={prefill?.date}
                       onCancel={() => setFormKey((k) => k + 1)}
                       onSaved={() => backToInbox(`Saved the values of the ${name} from ${report.patient_name}. The report is confirmed.`)} />
                   </>

@@ -5,7 +5,7 @@ import Modal from './Modal.jsx'
 // The uploaded report shown on screen (photo or PDF) - same inline viewing as the review split screen.
 // report: { id, test_label, upload_date, content_type }; `url` and `title` override the defaults
 // (e.g. for a prescription photo, which is not an outside-lab report).
-export default function DocumentPreview({ patientId, report, onClose, url: fileUrl, title: heading }) {
+export default function DocumentPreview({ patientId, report, onClose, url: fileUrl, title: heading, aside }) {
   const url = fileUrl ?? api.externalReportUrl(patientId, report.id)
   const pdf = report.content_type === 'application/pdf'
   const title = heading ?? `${report.test_label} report · uploaded ${formatDate(report.upload_date)}`
@@ -17,11 +17,14 @@ export default function DocumentPreview({ patientId, report, onClose, url: fileU
         </a>
         <button type="button" onClick={close} className="inline-flex h-9 items-center rounded-md border border-line-strong bg-surface px-3.5 text-sm font-medium text-ink hover:bg-subtle">Close</button>
       </>)}>
-      {pdf ? (
-        <iframe src={url} title={title} className="block h-[70vh] w-full bg-subtle" />
-      ) : (
-        <div className="bg-subtle"><img src={url} alt={title} className="mx-auto block w-full max-w-4xl" /></div>
-      )}
+      <div className={aside ? 'grid gap-3 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start' : ''}>
+        {pdf ? (
+          <iframe src={url} title={title} className="block h-[70vh] w-full bg-subtle" />
+        ) : (
+          <div className="bg-subtle"><img src={url} alt={title} className="mx-auto block w-full max-w-4xl" /></div>
+        )}
+        {aside && <div className="p-3 lg:p-0 lg:pr-3 lg:pt-3">{aside}</div>}
+      </div>
     </Modal>
   )
 }

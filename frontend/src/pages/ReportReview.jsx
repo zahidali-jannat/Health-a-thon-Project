@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, ExternalLink, Link2, XCircle } from 'lucid
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, formatDate, formatDateTime, todayIso } from '../api.js'
+import ExtractionPanel from '../components/Extraction.jsx'
 import TestName from '../components/TestName.jsx'
 import { AppShell, btn, ErrorBox, input } from '../components/ui.jsx'
 
@@ -15,6 +16,7 @@ export default function ReportReview() {
   const navigate = useNavigate()
   const [report, setReport] = useState(null)
   const [error, setError] = useState('')
+  const [prefill, setPrefill] = useState(null)          // a suggestion copied into the form ("Use")
 
   useEffect(() => {
     api.externalReport(patientId, reportId).then(setReport).catch((e) => setError(e.message))
@@ -31,9 +33,17 @@ export default function ReportReview() {
       {report && (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start">
           <DocumentViewer report={report} />
-          {report.status === 'pending_review'
-            ? <ValueForm report={report} onDone={done} />
-            : <Decided report={report} />}
+          <div className="space-y-4">
+            {report.status === 'pending_review'
+              ? <ValueForm key={prefill?.key ?? 'empty'} report={report} onDone={done} prefill={prefill} />
+              : <Decided report={report} />}
+            <ExtractionPanel patientId={report.patient_id} kind="external_report" sourceId={report.id} mode="single"
+              decided={report.status !== 'pending_review'}
+              onReupload={() => done(`Asked ${report.patient_name} to upload the right report.`)}
+              onUse={(f) => setPrefill({ key: `${f.id}-${Date.now()}`,
+                value: f.normalized_value != null && f.normalized_unit === report.expected_unit ? String(f.normalized_value) : f.value_text,
+                date: f.observed_on })} />
+          </div>
         </div>
       )}
     </AppShell>
@@ -67,12 +77,13 @@ export function DocumentViewer({ report: r, url: fileUrl, label, height = 'h-[70
 
 const row = 'flex justify-between gap-3 py-2 text-sm'
 
-function ValueForm({ report: r, onDone }) {
+function ValueForm({ report: r, onDone, prefill }) {
   const other = r.test_type === 'Other' && !r.expected_unit     // an ordered test brings its own unit
-  const [value, setValue] = useState('')
+  const [value, setValue] = useState(prefill?.value ?? '')
   const [unit, setUnit] = useState('')
-  const [changingDate, setChangingDate] = useState(false)
-  const [testDate, setTestDate] = useState(r.test_date)
+  const usePrefillDate = Boolean(prefill?.date && prefill.date !== r.test_date)
+  const [changingDate, setChangingDate] = useState(usePrefillDate)
+  const [testDate, setTestDate] = useState(usePrefillDate ? prefill.date : r.test_date)
   const [errors, setErrors] = useState({})
   const [serverError, setServerError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -119,7 +130,6 @@ function ValueForm({ report: r, onDone }) {
     <form onSubmit={save} noValidate className="rounded-lg border border-line bg-surface lg:sticky lg:top-16">
       <header className="border-b border-line px-4 py-3">
         <h2 className="text-base font-semibold text-ink">Enter the result</h2>
-        <p className="text-sm text-muted">Read it from the report on the left.</p>
       </header>
       <div className="px-4 pb-4">
         <dl className="divide-y divide-line">
@@ -137,7 +147,7 @@ function ValueForm({ report: r, onDone }) {
                   className={`${input} w-40!`} />
               ) : (
                 <span className="font-medium text-ink tnum">{formatDate(r.test_date)}
-                  {r.test_date === r.upload_date.slice(0, 10) && <span className="block text-xs font-normal text-warn-800">Upload day · check report</span>}</span>
+                  {r.test_date === r.upload_date.slice(0, 10) && <span className="block text-xs font-normal text-warn-800">Upload day</span>}</span>
               )}
               <button type="button" onClick={() => { setChangingDate((c) => !c); setTestDate(r.test_date); setErrors((x) => ({ ...x, date: null })) }}
                 className="mt-0.5 block w-full text-right text-xs text-brand-700 hover:underline">
@@ -162,7 +172,7 @@ function ValueForm({ report: r, onDone }) {
         {errors.value ? (
           <p className="mt-1.5 flex items-start gap-1.5 text-sm font-medium text-alert-800"><AlertTriangle size={15} aria-hidden="true" className="mt-0.5 shrink-0" /> {errors.value}</p>
         ) : (
-          <p id="ext-value-help" className="mt-1 text-xs text-muted">Exactly as printed. It is saved together with a link to this report.</p>
+          <span id="ext-value-help" className="sr-only">Exactly as printed on the report.</span>
         )}
 
         {other && (

@@ -7,17 +7,26 @@ import { btn, ErrorBox, Field, input } from './ui.jsx'
 const COMMON_TESTS = ['HbA1c', 'Fasting glucose', 'Hemoglobin', 'eGFR', 'Creatinine', 'LDL cholesterol', 'Urine protein', 'Triglycerides']
 const COMMON_UNITS = ['%', 'mg/dL', 'g/dL', 'mL/min/1.73m²', 'mmol/L']
 const emptyRow = () => ({ test_name: '', value: '', unit: '', reference: '' })
+// HbA1c is recorded in % only (the server refuses any other unit)
+const HBA1C = /\b(hb\s*-?\s*a1c|a1c|glyc(at|osyl)ated\s+ha?emoglobin)\b/i
+const fixedUnit = (name) => (HBA1C.test(name) ? '%' : null)
 
-export default function EnterResults({ report, patientId, onCancel, onSaved }) {
-  const [date, setDate] = useState(report.report_date.slice(0, 10))
-  const [rows, setRows] = useState([emptyRow()])
+export default function EnterResults({ report, patientId, onCancel, onSaved, initialRows, initialDate }) {
+  const [date, setDate] = useState(initialDate ?? report.report_date.slice(0, 10))
+  const [rows, setRows] = useState(initialRows?.length ? initialRows : [emptyRow()])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const setCell = (i, k) => (e) => setRows((rs) => rs.map((row, j) => (j === i ? { ...row, [k]: e.target.value } : row)))
+  const setCell = (i, k) => (e) => setRows((rs) => rs.map((row, j) => {
+    if (j !== i) return row
+    const next = { ...row, [k]: e.target.value }
+    const unit = k === 'test_name' && fixedUnit(next.test_name)
+    return unit ? { ...next, unit } : next
+  }))
 
   const save = async (e) => {
     e.preventDefault()
     const results = rows.filter((row) => row.test_name.trim() || row.value.trim())
+      .map((row) => ({ ...row, unit: fixedUnit(row.test_name) ?? row.unit }))
     if (!results.length) {
       setError('Enter at least one test and its result.')
       return
@@ -35,7 +44,6 @@ export default function EnterResults({ report, patientId, onCancel, onSaved }) {
 
   return (
     <form onSubmit={save} className="rounded-md border border-line bg-surface p-3">
-      <p className="text-xs text-muted">Copy the values exactly as printed on the report. Leave the reference empty if none is printed.</p>
       <Field label="Date of the test" htmlFor={`rd-${report.id}`} required className="mt-2">
         <input id={`rd-${report.id}`} type="date" value={date} max={todayIso()} onChange={(e) => setDate(e.target.value)} required className={`${input} max-w-44`} />
       </Field>
@@ -49,7 +57,9 @@ export default function EnterResults({ report, patientId, onCancel, onSaved }) {
           <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-[1.4fr_0.8fr_0.8fr_1.2fr]">
             <input aria-label={`Test ${i + 1}`} list="uc2-tests" value={row.test_name} onChange={setCell(i, 'test_name')} placeholder="e.g. HbA1c" className={input} />
             <input aria-label={`Result ${i + 1}`} value={row.value} onChange={setCell(i, 'value')} placeholder="Result" className={`${input} tnum`} />
-            <input aria-label={`Unit ${i + 1}`} list="uc2-units" value={row.unit} onChange={setCell(i, 'unit')} placeholder="Unit" className={input} />
+            <input aria-label={`Unit ${i + 1}`} list="uc2-units" value={fixedUnit(row.test_name) ?? row.unit} onChange={setCell(i, 'unit')}
+              readOnly={Boolean(fixedUnit(row.test_name))} placeholder="Unit"
+              className={`${input} ${fixedUnit(row.test_name) ? 'bg-subtle text-muted' : ''}`} />
             <input aria-label={`Reference ${i + 1}`} value={row.reference} onChange={setCell(i, 'reference')} placeholder="e.g. < 5.7" className={input} />
           </div>
         ))}

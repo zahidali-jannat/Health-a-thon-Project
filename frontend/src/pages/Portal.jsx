@@ -1,6 +1,6 @@
 import {
   AlertTriangle, ArrowLeft, CalendarDays, Camera, Check, ClipboardList, CheckCircle2, ChevronDown, ChevronRight, Droplet, FileText, FlaskConical, FolderOpen, House, KeyRound, LogIn, LogOut,
-  Menu, Pill, Plus, ShieldCheck, Stethoscope, Upload, UserPlus, X,
+  Menu, Pill, Plus, RotateCcw, ShieldCheck, Stethoscope, Upload, UserPlus, X,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -25,6 +25,7 @@ const link = 'font-semibold text-brand-700 underline-offset-2 hover:underline'
 export default function Portal() {
   const [patient, setPatient] = useState(undefined)
   const [screen, setScreen] = useState('home')
+  const [arg, setArg] = useState(null)                   // e.g. which test "Send report" opens with
   const [doneMessage, setDoneMessage] = useState('')
   const [ageLater, setAgeLater] = useState(false)     // "Not now": asked again at the next sign-in
 
@@ -43,6 +44,7 @@ export default function Portal() {
     setScreen('done')
   }
   const home = () => setScreen('home')
+  const go = (s, a = null) => { setArg(a); setScreen(s) }
   const signOut = async () => {
     await api.patientLogout().catch(() => {})
     setPatient(null)
@@ -65,19 +67,20 @@ export default function Portal() {
     large: true,
     sidebar: (close) => (
       <PatientSidebar patient={patient} screen={screen} onSignOut={signOut}
-        go={(s) => { setScreen(s); close?.() }} />
+        go={(s) => { go(s); close?.() }} />
     ),
-    bottomBar: (openMore) => <PatientTabs screen={screen} go={setScreen} openMore={openMore} />,
+    bottomBar: (openMore) => <PatientTabs screen={screen} go={go} openMore={openMore} />,
   }
   const crumbs = (...rest) => [{ label: 'Home', onClick: home }, ...rest]
-  const props = { shell, crumbs, patient, go: setScreen, onBack: home, onDone: finish }
+  const props = { shell, crumbs, patient, go, arg, onBack: home, onDone: finish }
 
   switch (screen) {
     case 'refill': return <RefillScreen {...props} />
     case 'sugar': return <SugarScreen {...props} />
     case 'send':
     case 'photo':                 // older links: both now open the one Send report screen
-    case 'external': return <SendReportScreen {...props} />
+    case 'external': return <SendReportScreen key={JSON.stringify(arg)} {...props} />
+    case 'resend': return <ResendScreen key={JSON.stringify(arg)} {...props} />
     case 'documents': return <DocumentsScreen {...props} />
     case 'doctors': return <DoctorsScreen {...props} />
     case 'appointments': return <AppointmentsScreen {...props} />
@@ -95,6 +98,7 @@ const NAV = [
   { key: 'home', label: 'Home', icon: House },
   { key: 'send', label: 'Send report', icon: Upload },
   { key: 'documents', label: 'My reports', icon: FolderOpen },
+  { key: 'resend', label: 'Re-upload request', icon: RotateCcw },
   { key: 'appointments', label: 'Appointments', icon: CalendarDays },
   { key: 'tests', label: 'My tests', icon: ClipboardList },
   { key: 'sugar', label: 'Sugar reading', icon: Droplet },
@@ -629,7 +633,9 @@ function DocName({ d }) {
   if (d.document_type === 'prescription') return 'Prescription'
   if (d.document_type === 'medicine_bill') return 'Medicine bill'
   if (d.document_type === 'glucometer_photo') return 'Meter photo'
-  if (d.description && ['lab_report', 'external'].includes(d.document_type)) return <><TestName name={d.description} /> report</>
+  if (d.description && ['lab_report', 'external'].includes(d.document_type)) {
+    return <><TestName name={d.description} />{/\breport$/i.test(d.description) ? '' : ' report'}</>
+  }
   return d.document_type === 'other' ? 'Document' : 'Lab report'
 }
 const DocStatus = ({ status }) => <Badge tone={STATUS[status]?.tone ?? 'neutral'} className="text-sm!">{STATUS[status]?.label ?? status}</Badge>
@@ -708,9 +714,10 @@ function CareTeamMessages({ go }) {
   return (
     <ul className="mb-4 space-y-2" aria-label="Messages from your care team">
       {messages.map((m) => {
-        const ok = m.kind === 'bill_approved'
+        const ok = m.kind === 'bill_approved' || m.kind === 'reupload_accepted'
         const rebook = m.kind === 'appointment_reschedule'
         const test = m.kind === 'test_reminder' || m.kind === 'test_rejected'
+        const reupload = m.kind === 'reupload_request' || m.kind === 'reupload_accepted'
         return (
           <li key={m.id} className={`rounded-lg border border-l-4 bg-surface px-4 py-3 ${ok ? 'border-line border-l-ok-700' : 'border-line border-l-alert-700'}`}>
             <p className={`flex items-start gap-2 text-base ${ok ? 'text-ink' : 'text-ink'}`}>
@@ -719,9 +726,10 @@ function CareTeamMessages({ go }) {
               <span>{m.message}</span>
             </p>
             <div className="mt-2 flex flex-wrap gap-2 pl-7">
-              {test ? <button type="button" onClick={() => { dismiss(m); go('tests') }} className={b.primary}><ClipboardList size={18} aria-hidden="true" /> Open my tests</button>
+              {reupload ? <button type="button" onClick={() => { dismiss(m); go('send') }} className={b.primary}><Upload size={18} aria-hidden="true" /> Send report</button>
+                : test ? <button type="button" onClick={() => { dismiss(m); go('tests') }} className={b.primary}><ClipboardList size={18} aria-hidden="true" /> Open my tests</button>
                 : rebook ? <button type="button" onClick={() => { dismiss(m); go('appointments') }} className={b.primary}><CalendarDays size={18} aria-hidden="true" /> Choose a new time</button>
-                : !ok && <button type="button" onClick={() => { dismiss(m); go('refill') }} className={b.primary}><Upload size={18} aria-hidden="true" /> Upload a new bill</button>}
+                : m.kind === 'bill_rejected' && <button type="button" onClick={() => { dismiss(m); go('refill') }} className={b.primary}><Upload size={18} aria-hidden="true" /> Upload a new bill</button>}
               <button type="button" onClick={() => dismiss(m)} className={b.secondary}>OK</button>
             </div>
           </li>
@@ -968,13 +976,15 @@ function SugarScreen({ shell, crumbs, onBack, onDone }) {
 // they arrive as one file. The date is recorded when it is sent; the care team reads the date on the report.
 const MAX_PAGES = 10
 
-function SendReportScreen({ shell, crumbs, onBack, onDone }) {
+function SendReportScreen({ shell, crumbs, go, arg, onBack, onDone }) {
   const tests = useReportTests()
-  const [kind, setKind] = useState(null)
-  const [test, setTest] = useState('')
+  const [kind, setKind] = useState(arg?.kind ?? null)
+  const [test, setTest] = useState(arg?.test ?? '')
+  const [already, setAlready] = useState(null)         // the same report is already being checked
   const [testName, setTestName] = useState('')
   const [pages, setPages] = useState([])
   const [progress, setProgress] = useState(null)
+  const [mismatch, setMismatch] = useState(null)        // the report doesn't look like the chosen test
   const { busy, error, setError, run } = useSubmit()
   const urls = useRef([])
   useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), [])
@@ -997,15 +1007,24 @@ function SendReportScreen({ shell, crumbs, onBack, onDone }) {
   const other = test === 'other'
   const ready = kind && pages.length > 0 && (!lab || (test && (!other || testName.trim().length >= 2)))
 
+  const send = (confirmMismatch = false) => {
+    setProgress(0)
+    setMismatch(null)
+    run(async () => {
+      try {
+        const r = await api.sendReport({ kind, test: lab ? test : null, testName: other ? testName.trim() : null,
+          files: pages.map((p) => p.file), confirmMismatch }, setProgress)
+        onDone(r.message)
+      } catch (err) {
+        if (err.code === 'already_sent') { setAlready(err.data); return }
+        if (err.code !== 'test_mismatch') throw err
+        setMismatch(err.data)
+      }
+    }).finally(() => setProgress(null))
+  }
   const submit = (e) => {
     e.preventDefault()
-    if (!ready) return
-    setProgress(0)
-    run(async () => {
-      const r = await api.sendReport({ kind, test: lab ? test : null, testName: other ? testName.trim() : null,
-        files: pages.map((p) => p.file) }, setProgress)
-      onDone(r.message)
-    }).finally(() => setProgress(null))
+    if (ready) send()
   }
 
   const segment = (active) => `flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-base font-semibold ${
@@ -1080,6 +1099,30 @@ function SendReportScreen({ shell, crumbs, onBack, onDone }) {
           )}
 
           <Alert>{error}</Alert>
+          {already && (
+            <div role="alert" className="rounded-md border border-warn-200 bg-warn-50 px-3 py-2.5">
+              <p className="flex items-center gap-2 text-base font-semibold text-warn-800">
+                <AlertTriangle size={18} aria-hidden="true" className="shrink-0" /> {already.message}
+              </p>
+              <div className="mt-2">
+                {already.requested
+                  ? <Badge tone="info" className="text-sm!">Re-upload requested</Badge>
+                  : <button type="button" onClick={() => go('resend', { source_kind: already.source_kind, source_id: already.source_id })}
+                      className={`${btn.primary} h-10! px-4! text-base!`}><RotateCcw size={16} aria-hidden="true" /> Request re-upload</button>}
+              </div>
+            </div>
+          )}
+          {mismatch && (
+            <div role="alert" className="rounded-md border border-warn-200 bg-warn-50 px-3 py-2.5">
+              <p className="flex items-center gap-2 text-base font-semibold text-warn-800">
+                <AlertTriangle size={18} aria-hidden="true" className="shrink-0" /> {mismatch.message}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button type="button" onClick={() => setMismatch(null)} className={`${btn.primary} h-10! px-4! text-base!`}>Choose again</button>
+                <button type="button" disabled={busy} onClick={() => send(true)} className={`${btn.secondary} h-10! px-4! text-base!`}>Send anyway</button>
+              </div>
+            </div>
+          )}
           {progress !== null && (
             <div className="h-1.5 overflow-hidden rounded-full bg-subtle" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} aria-label="Sending">
               <div className="h-full bg-brand-600" style={{ width: `${progress}%` }} />
@@ -1092,7 +1135,7 @@ function SendReportScreen({ shell, crumbs, onBack, onDone }) {
           <div className="flex gap-2">
             <button type="button" onClick={onBack} className={`${btn.ghost} h-11! px-4! text-base!`}>Cancel</button>
             <button type="submit" disabled={!ready || busy} className={`${btn.primary} h-11! px-6! text-base! font-semibold`}>
-              <Upload size={18} aria-hidden="true" /> {busy ? 'Sending…' : 'Send'}
+              <Upload size={18} aria-hidden="true" /> {busy ? (progress === 100 ? 'Checking…' : 'Sending…') : 'Send'}
             </button>
           </div>
         </footer>
@@ -1155,6 +1198,98 @@ function TestSelect({ id, tests, value, onChange }) {
         </ul>
       )}
     </div>
+  )
+}
+
+/* ============================================================== re-upload request */
+
+// A report still being checked can't be sent again by the patient: they choose it here and ask the clinical team.
+const REQUEST_STATUS = { requested: ['info', 'Waiting'], accepted: ['ok', 'Accepted'], declined: ['neutral', 'Declined'] }
+
+function ResendScreen({ shell, crumbs, go, arg }) {
+  const [data, setData] = useState(null)
+  const [choice, setChoice] = useState(arg?.source_id ? `${arg.source_kind}:${arg.source_id}` : '')
+  const [reason, setReason] = useState('')
+  const [sent, setSent] = useState('')
+  const { busy, error, setError, run } = useSubmit()
+  const load = () => api.myReuploadRequests().then(setData).catch((e) => setError(e.message))
+  useEffect(() => {
+    api.myReuploadRequests().then(setData).catch((e) => setError(e.message))
+  }, [setError])
+  const open = (data?.waiting ?? []).filter((u) => !u.requested)
+  const submit = (e) => {
+    e.preventDefault()
+    const [source_kind, source_id] = choice.split(':')
+    run(async () => {
+      await api.askReupload({ source_kind, source_id, reason: reason.trim() || null })
+      setChoice('')
+      setReason('')
+      setSent('Request sent.')
+      await load()
+    })
+  }
+  const sendAgain = (q) => go('send', q.test_key === 'prescription' ? { kind: 'prescription' }
+    : { kind: 'lab_report', test: q.test_key ?? 'other' })
+
+  return (
+    <AppShell {...shell} title="Re-upload request" breadcrumbs={crumbs({ label: 'Re-upload request' })}>
+      <div className="max-w-xl space-y-5">
+        <form onSubmit={submit} className="rounded-lg border border-line bg-surface">
+          <div className="space-y-4 px-5 py-5">
+            <div>
+              <label htmlFor="rs-report" className="text-sm font-semibold text-ink">
+                Report<span className="ml-0.5 text-alert-700" aria-hidden="true">*</span>
+              </label>
+              {data && open.length === 0 ? <p className="mt-1.5 text-base text-muted">No report waiting.</p> : (
+                <select id="rs-report" value={choice} onChange={(e) => { setChoice(e.target.value); setSent('') }}
+                  className={`${input} mt-1.5 h-11! text-base!`}>
+                  <option value="">Select report</option>
+                  {open.map((u) => (
+                    <option key={u.source_id} value={`${u.source_kind}:${u.source_id}`}>{u.label} · {formatDate(u.uploaded_at)}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label htmlFor="rs-reason" className="text-sm font-semibold text-ink">Reason <span className="font-normal text-muted">(optional)</span></label>
+              <input id="rs-reason" maxLength={200} value={reason} onChange={(e) => setReason(e.target.value)} className={`${input} mt-1.5 h-11! text-base!`} />
+            </div>
+            <Alert>{error}</Alert>
+            <Success>{sent}</Success>
+          </div>
+          <footer className="flex justify-end border-t border-line bg-subtle px-5 py-3">
+            <button type="submit" disabled={!choice || busy} className={`${btn.primary} h-11! px-6! text-base! font-semibold`}>
+              <RotateCcw size={16} aria-hidden="true" /> {busy ? 'Sending…' : 'Send request'}
+            </button>
+          </footer>
+        </form>
+
+        {data?.requests.length > 0 && (
+          <Panel large title="My requests" bodyClass="">
+            <ul className="divide-y divide-line">
+              {data.requests.map((q) => {
+                const [tone, label] = REQUEST_STATUS[q.status]
+                return (
+                  <li key={q.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+                    <span className="min-w-0">
+                      <span className="block text-base font-medium text-ink"><TestName name={q.label} /></span>
+                      <span className="block text-sm text-muted tnum">{formatDate(q.requested_at)}{q.note ? ` · ${q.note}` : ''}</span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Badge tone={tone} className="text-sm!">{label}</Badge>
+                      {q.status === 'accepted' && (
+                        <button type="button" onClick={() => sendAgain(q)} className={`${btn.primary} h-9! px-3! text-sm!`}>
+                          <Upload size={15} aria-hidden="true" /> Send report</button>
+                      )}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          </Panel>
+        )}
+      </div>
+    </AppShell>
   )
 }
 
