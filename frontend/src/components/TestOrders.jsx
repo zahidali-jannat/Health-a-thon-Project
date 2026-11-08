@@ -551,8 +551,8 @@ export function OverdueTestsPanel() {
                 <tr key={r.id} className="hover:bg-subtle">
                   <td className={td}><Link to={`/care-team/patients/${r.patient_id}?tab=tests`} className="font-medium hover:text-brand-700 hover:underline">{r.patient_name}</Link>
                     <span className="block text-xs text-muted tnum">{r.patient_code}</span></td>
-                  <td className={td}>{r.test}{r.priority === 'urgent' && <span className="block text-xs text-muted">Urgent</span>}</td>
-                  <td className={`${td} whitespace-nowrap tnum`}>{formatDate(r.due_by)}<span className="block text-xs font-semibold text-alert-800">Overdue {r.days_overdue} day{r.days_overdue === 1 ? '' : 's'}</span></td>
+                  <td className={td}>{r.test}</td>
+                  <td className={`${td} whitespace-nowrap tnum`}>{formatDate(r.due_by)}</td>
                   <td className={`${td} whitespace-nowrap tnum`}>{r.next_appointment_date ? <>{formatDate(r.next_appointment_date)}<span className="block text-xs text-muted">in {r.days_to_appointment} day{r.days_to_appointment === 1 ? '' : 's'}</span></> : <span className="text-muted">None booked</span>}</td>
                   <td className={`${td} text-muted`}>{r.ordered_by}</td>
                 </tr>

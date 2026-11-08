@@ -61,7 +61,7 @@ export default function Overview() {
           </dl>
 
           {list.length === 0 && (
-            <Panel title="Getting started" className="mt-4">
+            <Panel title="Getting started" className="mt-6 sm:mt-8 lg:mt-10">
               <ol className="list-decimal space-y-1 pl-5 text-sm text-ink">
                 <li>Add a patient — either an existing Patient ID, or register someone new.</li>
                 <li>Or give your Clinician ID <strong>{user.clinician_code}</strong> to patients; they add you under “My doctors”.</li>
@@ -70,8 +70,8 @@ export default function Overview() {
             </Panel>
           )}
 
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-            <div className="min-w-0 space-y-4">
+          <div className="mt-6 sm:mt-8 lg:mt-10 grid gap-6 sm:gap-8 lg:gap-10 xl:grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="min-w-0 space-y-6 sm:space-y-8 lg:space-y-10">
               <Panel title={<span className="text-base font-bold">Attention</span>} bodyClass=""
                 actions={<Link to="/care-team/patients" className="text-sm text-brand-700 hover:underline">All patients</Link>}>
                 {flagged.length === 0 ? (
@@ -160,7 +160,7 @@ export default function Overview() {
               <OverdueTestsPanel />
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-6 sm:space-y-8 lg:space-y-10">
               <Panel title="Upcoming appointments" description="Next 30 days" bodyClass="">
                 {work.upcoming_visits.length === 0 ? <p className="px-4 py-5 text-sm text-muted">No appointments booked.</p> : (
                   <ul className="divide-y divide-line">
