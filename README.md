@@ -708,8 +708,20 @@ The API also serves the built website, so the whole app runs as one service at o
 - **Demo data only:** `UC2_SEED_DEMO=1` loads the made-up demo patients into an EMPTY database (never into one that
   has patients). `VITE_PUBLIC_DEMO=1` shows the demo logins on the front page. Never upload `backend/uc2.db`: it holds
   real people's records. `.gitignore` and `.dockerignore` keep every `*.db` file out.
-- **Production mode:** `APP_ENV=prod` sets secure cookies and never shows one-time codes on screen. Patients sign in
-  with a password; sign-up by SMS code needs a real SMS provider (the hook is in `routers/auth.py`).
+- **Production mode:** `APP_ENV=prod` sets secure cookies and does not show one-time codes on screen. Patients sign in
+  with a password; sign-up by SMS code needs a real SMS provider (the hook is in `routers/auth.py`). Until then,
+  `UC2_SHOW_CODES=1` (set in `render.yaml`) shows the sign-up and sign-in codes on screen so new accounts can be made.
+- **Keeping data on the free plan:** Render's free plan wipes the disk on every restart and deploy (and it sleeps
+  after ~15 idle minutes). Set `UC2_BACKUP_URL` and `UC2_BACKUP_KEY` in the Render dashboard and the app keeps a copy
+  of the database and uploaded files in a private Supabase Storage bucket (`UC2_BACKUP_BUCKET`, default
+  `uc2-backup`, created automatically). `backend/app/backup.py`:
+  - **Start-up:** with no database file yet, it downloads the last copy. If the bucket cannot be read, the server
+    does not start, rather than starting empty and overwriting the good copy.
+  - **Running:** every 5 seconds it uploads a snapshot if anything changed, and once more at shutdown. Files are
+    uploaded as they are saved and downloaded again the first time they are needed after a restart.
+  - **Deploys:** the new server takes a lease; the old one stops uploading, so it can never overwrite newer data.
+    A change made on the old server during the minute of a deploy can be lost.
+  - **Off by default:** with no `UC2_BACKUP_*` settings nothing leaves the machine.
 
 **Search engines:**
 - **Indexed:** only the front page `/`, which explains the product in plain words. `index.html` carries the title,

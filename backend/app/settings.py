@@ -25,6 +25,14 @@ class Settings:
     sarvam_api_key: str | None = None   # OCR for scans and photos (Sarvam Vision); unset = those go to manual review
     sarvam_language: str = "en-IN"
     extraction_sweep: bool = True       # at start-up: read uploads not read yet, and mark interrupted ones failed
+    show_codes: bool = False            # one-time sign-up / sign-in codes shown on screen (dev, or a public demo with no SMS)
+    backup_url: str = ""                # Supabase project URL: keep a copy of the database + files there (hosts with no disk)
+    backup_key: str | None = None       # Supabase service_role / secret key (server-side only, never in the website)
+    backup_bucket: str = "uc2-backup"
+
+    @property
+    def backup_enabled(self) -> bool:
+        return bool(self.backup_url and self.backup_key)
 
     @property
     def is_dev(self) -> bool:
@@ -47,4 +55,8 @@ def get_settings() -> Settings:
         sarvam_api_key=os.environ.get("SARVAM_API_KEY") or None,
         sarvam_language=os.environ.get("SARVAM_LANGUAGE", "en-IN"),
         extraction_sweep=os.environ.get("UC2_EXTRACTION_SWEEP", "on") == "on",
+        show_codes=app_env == "dev" or os.environ.get("UC2_SHOW_CODES") == "1",
+        backup_url=os.environ.get("UC2_BACKUP_URL", "").rstrip("/"),
+        backup_key=os.environ.get("UC2_BACKUP_KEY") or None,
+        backup_bucket=os.environ.get("UC2_BACKUP_BUCKET", "uc2-backup"),
     )

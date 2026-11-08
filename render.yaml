@@ -1,7 +1,10 @@
 # Render Blueprint: a public DEMO of UC2 Consultation Readiness (made-up patients only).
 # Render -> New -> Blueprint -> pick this repository. After the first deploy, set SITE_URL to the address
 # Render gives (e.g. https://uc2-consultation-readiness.onrender.com) or your own domain, and redeploy.
-# The free plan has no persistent disk: the demo data is re-created on every deploy and restart.
+# The free plan has no persistent disk. To keep accounts, passwords and uploaded reports across restarts, set
+# UC2_BACKUP_URL (Supabase project URL) and UC2_BACKUP_KEY (its service_role / secret key) in the Render dashboard:
+# the app then keeps a copy in a private Supabase Storage bucket and restores it on start-up (backend/app/backup.py).
+# Without them, the demo data is re-created on every deploy and restart.
 services:
   - type: web
     name: uc2-consultation-readiness
@@ -19,5 +22,11 @@ services:
         value: /tmp/uc2.db
       - key: UC2_STORAGE_DIR
         value: /tmp/storage
+      - key: UC2_SHOW_CODES          # no SMS provider yet: show sign-up / sign-in codes on screen
+        value: "1"
+      - key: UC2_BACKUP_URL          # e.g. https://abcd1234.supabase.co (set in the dashboard)
+        sync: false
+      - key: UC2_BACKUP_KEY          # Supabase service_role / secret key - never commit it
+        sync: false
       - key: SITE_URL
         sync: false

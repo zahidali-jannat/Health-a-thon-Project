@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 
+from . import backup
 from . import db
 from . import orders
 from .routers import appointments, auth, briefs, clinical, portal, reports
@@ -38,6 +39,8 @@ async def _reminder_loop() -> None:
 async def lifespan(_app: FastAPI):
     # Bring the schema up to date and the test catalog in line with backend/config/test_orders.json.
     # No patient data is ever created automatically.
+    if backup.enabled():
+        backup.restore()                       # the disk was wiped (e.g. Render free plan): bring the data back
     conn = db.connect()
     db.migrate(conn)
     orders.sync_catalog(conn)
@@ -53,12 +56,16 @@ async def lifespan(_app: FastAPI):
         pipeline.recover_interrupted()
         pipeline.backfill()
         pipeline.start_worker()
+    if backup.enabled():
+        backup.start()                         # from now on, every change is copied to the backup
     task = asyncio.create_task(_reminder_loop()) if get_settings().reminders else None
     yield
     if task:
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+    if backup.enabled():
+        await asyncio.to_thread(backup.stop)   # upload the last changes before the server goes away
 
 
 app = FastAPI(title="UC2 Consultation Readiness", lifespan=lifespan)

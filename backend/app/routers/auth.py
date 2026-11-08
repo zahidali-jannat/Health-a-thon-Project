@@ -203,7 +203,7 @@ def patient_signup(body: PatientSignupIn, conn=Depends(get_conn)):
         raise HTTPException(409 if "already exists" in str(e) else 422, str(e))
     conn.commit()
     out = {"sent": True, "phone_hint": "•••••" + phone[-4:]}
-    if settings.is_dev:
+    if settings.show_codes:
         out["dev_code"] = code
     return out
 
@@ -250,7 +250,7 @@ def patient_request_code(body: CodeRequestIn, conn=Depends(get_conn)):
     conn.commit()
     # Real deployment: send `code` by SMS here. In dev the code is returned so the demo works without SMS.
     out = {"sent": True, "phone_hint": "•••••" + patient["phone"][-4:]}
-    if settings.is_dev:
+    if settings.show_codes:
         out["dev_code"] = code
     return out
 

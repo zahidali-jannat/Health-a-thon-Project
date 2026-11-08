@@ -21,6 +21,8 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("UC2_REMINDERS", "off")      # tests run reminders explicitly, never on a timer
     monkeypatch.setenv("UC2_EXTRACTION_SWEEP", "off")   # tests read documents explicitly
     monkeypatch.delenv("SARVAM_API_KEY", raising=False)  # never call the real OCR service from a test
+    for name in ("UC2_BACKUP_URL", "UC2_BACKUP_KEY", "UC2_SHOW_CODES", "UC2_SEED_DEMO"):
+        monkeypatch.delenv(name, raising=False)          # never touch a real backup bucket from a test
     from app import ratelimit
     ratelimit.reset_all()         # the lockout is in-memory; don't let one test lock out the next
     yield
